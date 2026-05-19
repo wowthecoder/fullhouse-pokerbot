@@ -36,11 +36,11 @@ BOT_PATHS = {
     "The Shark": "bots/shark.py",
     "Loose passive": "bots/loose_passive.py",
     "Pot-Odds Bot B": "bots/pot_odds_caller.py",
-    "Tight": "bots/tight.py",
+    "BlackRain79": "bots/rule_based_TAG/bot.py",
 }
 
 MY_BOT_PATH = "bots/my_bot/bot.py"
-RUN_HANDS_COUNT = 100
+RUN_HANDS_COUNT = 500
 ROUND_ROBIN_HANDS = 500
 
 state = {
