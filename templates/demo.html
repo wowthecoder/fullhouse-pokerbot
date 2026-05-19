@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Fullhouse — Local Demo</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #080c08; color: #00ff41; font-family: 'Share Tech Mono', 'Courier New', monospace; font-size: 14px; overflow: hidden; }
+
+.grid { display: grid; grid-template-columns: minmax(360px, 42%) minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "header header" "log metrics" "board metrics"; gap: 1px; height: 100vh; padding-bottom: 34px; background: #1a2e1a; }
+.panel { background: #080c08; padding: 16px; overflow: hidden; display: flex; flex-direction: column; }
+.header { grid-area: header; border-bottom: 1px solid #00ff41; padding: 12px 16px; display: flex; align-items: center; gap: 24px; }
+.log-panel { grid-area: log; }
+.board-panel { grid-area: board; }
+.metrics-panel { grid-area: metrics; }
+.logo { font-size: 18px; letter-spacing: 2px; }
+.blink { animation: blink 1s step-end infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+
+h2 { font-size: 12px; letter-spacing: 3px; color: #00cc33; margin-bottom: 12px; text-transform: uppercase; }
+h3 { color: #ffffff; font-size: 12px; letter-spacing: 1px; margin: 14px 0 6px; }
+
+#log, #board, #replay, #metrics { flex: 1; overflow-y: auto; }
+#log { font-size: 12px; line-height: 1.8; }
+#log div { padding: 1px 0; }
+.info  { color: #00ff41; }
+.win   { color: #00ffcc; }
+.err   { color: #ff4444; }
+.dim   { color: #3a6e3a; }
+.bold  { color: #ffffff; font-weight: bold; }
+
+.row { display: grid; grid-template-columns: 28px 1fr 90px 70px; gap: 8px; padding: 5px 0; border-bottom: 1px solid #0d1f0d; align-items: center; font-size: 13px; }
+.row.header { color: #3a6e3a; font-size: 11px; letter-spacing: 1px; }
+.rank  { color: #3a6e3a; }
+.rank.top { color: #00ff41; }
+.delta.pos { color: #00ffcc; }
+.delta.neg { color: #ff4444; }
+.bar-wrap { background: #0d1f0d; height: 4px; border-radius: 2px; margin-top: 2px; }
+.bar { height: 4px; background: #00ff41; border-radius: 2px; transition: width 0.5s; }
+
+.controls { margin-top: 12px; display: flex; gap: 10px; flex-wrap: wrap; }
+button { background: transparent; border: 1px solid #00ff41; color: #00ff41; font-family: inherit; font-size: 12px; padding: 6px 16px; cursor: pointer; letter-spacing: 1px; transition: all 0.15s; }
+button:hover { background: #00ff41; color: #080c08; }
+button:disabled { opacity: 0.3; cursor: not-allowed; }
+button:disabled:hover { background: transparent; color: #00ff41; }
+
+.status-pill { font-size: 11px; letter-spacing: 2px; padding: 3px 10px; border: 1px solid #3a6e3a; color: #3a6e3a; }
+.status-pill.running { border-color: #00ff41; color: #00ff41; animation: pulse 1s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.5; } }
+
+.hand-card { border: 1px solid #1a2e1a; padding: 8px 10px; margin-bottom: 6px; }
+.hand-card:hover { border-color: #3a6e3a; }
+.hand-meta { color: #3a6e3a; font-size: 11px; margin-bottom: 4px; }
+.action-line { color: #00cc33; }
+.action-line.fold { color: #3a6e3a; }
+.action-line.raise, .action-line.all_in { color: #00ffcc; }
+.community { color: #ffffff; letter-spacing: 2px; }
+
+.metrics-head { display: grid; grid-template-columns: 1fr 100px 110px 120px; gap: 12px; color: #3a6e3a; font-size: 11px; padding-bottom: 6px; border-bottom: 1px solid #1a2e1a; }
+.bot-metrics { border-bottom: 1px solid #1a2e1a; padding: 10px 0 14px; }
+.bot-summary { display: grid; grid-template-columns: 1fr 100px 110px 120px; gap: 12px; align-items: center; color: #ffffff; }
+.metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 4px 16px; font-size: 12px; }
+.metric { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px dotted #123012; padding: 2px 0; }
+.metric-wide { display: block; grid-column: 1 / -1; }
+.metric span:first-child { color: #3a6e3a; }
+.nested { color: #00cc33; margin-top: 3px; }
+.position-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 8px; margin-top: 6px; }
+.position-col { border: 1px solid #123012; padding: 8px; min-width: 0; }
+.position-title { color: #ffffff; font-size: 11px; margin-bottom: 5px; }
+.position-stat { display: flex; justify-content: space-between; gap: 8px; color: #00cc33; font-size: 11px; padding: 2px 0; border-bottom: 1px dotted #123012; }
+.position-stat span:first-child { color: #3a6e3a; }
+.replay-drawer { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; height: 34px; background: #080c08; border-top: 1px solid #00ff41; transition: height 0.18s ease; }
+.replay-drawer.expanded { height: min(320px, 46vh); }
+.replay-toggle { width: 100%; height: 33px; border: 0; border-bottom: 1px solid #1a2e1a; display: flex; justify-content: center; align-items: center; gap: 10px; }
+.replay-body { display: none; height: calc(100% - 34px); padding: 12px 16px 16px; overflow-y: auto; }
+.replay-drawer.expanded .replay-body { display: block; }
+.empty { color: #3a6e3a; font-size: 12px; }
+@media (max-width: 900px) {
+  body { overflow: auto; }
+  .grid { grid-template-columns: 1fr; grid-template-rows: auto minmax(280px, auto) minmax(280px, auto) minmax(420px, auto); grid-template-areas: "header" "log" "board" "metrics"; height: auto; min-height: 100vh; }
+  .panel { min-height: 280px; }
+}
+</style>
+</head>
+<body>
+<div class="grid">
+  <div class="header">
+    <span class="logo">FULLHOUSE<span class="blink">_</span></span>
+    <span class="status-pill" id="status">IDLE</span>
+    <span style="color:#3a6e3a;font-size:11px" id="round-label"></span>
+  </div>
+
+  <div class="panel log-panel">
+    <h2>Event log</h2>
+    <div id="log"></div>
+    <div class="controls">
+      <button id="btn-single" onclick="runSingle()">Run 1 match</button>
+      <button id="btn-tournament" onclick="runTournament()">Run tournament</button>
+      <button id="btn-hands" onclick="runConfiguredHands()">Run {{ run_hands_count }} hands</button>
+      <button id="btn-round-robin" onclick="runRoundRobin()">Round robin</button>
+      <button id="btn-clear" onclick="clearLog()">Clear log</button>
+    </div>
+  </div>
+
+  <div class="panel board-panel">
+    <h2>Leaderboard</h2>
+    <div id="board">
+      <div class="row header">
+        <span>#</span><span>Bot</span><span>Chip Δ</span><span>Matches</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel metrics-panel">
+    <h2>Metrics <span id="metrics-summary" style="color:#3a6e3a"></span></h2>
+    <div id="metrics"><div class="empty">Run {{ run_hands_count }} hands or Round robin to populate analytics.</div></div>
+  </div>
+
+  <div class="replay-drawer" id="replay-drawer">
+    <button class="replay-toggle" id="replay-toggle" onclick="toggleReplay()">Hand replay <span id="hand-count" style="color:#3a6e3a"></span></button>
+    <div class="replay-body">
+    <div id="replay"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+let running = false;
+const runHandsCount = {{ run_hands_count }};
+const runButtons = ['btn-single', 'btn-tournament', 'btn-hands', 'btn-round-robin'];
+
+const labels = {
+  bb_per_100: 'bb/100',
+  bb_per_100_ci_low: 'bb/100 CI low',
+  bb_per_100_ci_high: 'bb/100 CI high',
+  ev_per_hand: 'EV/hand',
+  vpip: 'VPIP',
+  pfr: 'PFR',
+  three_bet: '3-bet %',
+  fold_to_three_bet: 'Fold to 3-bet %',
+  limp: 'Limp %',
+  steal_attempt: 'Steal attempt %',
+  fold_bb_to_steal: 'Fold BB to steal %',
+  open_raise_by_position: 'Open raise by position',
+  aggression_factor: 'Aggression factor',
+  aggression_frequency: 'Aggression frequency',
+  continuation_bet_flop: 'Continuation bet flop %',
+  continuation_bet_turn: 'Continuation bet turn %',
+  continuation_bet_river: 'Continuation bet river %',
+  fold_to_continuation_bet: 'Fold to continuation bet %',
+  showdown_observed_bluff_frequency: 'Showdown-observed bluff frequency',
+  wtsd: 'WTSD',
+  wonsd: 'W$SD',
+  showdown_win_rate: 'Showdown win rate',
+  non_showdown_winnings: 'Non-showdown winnings',
+  showdown_winnings: 'Showdown winnings',
+  by_position: 'By position',
+  blind_loss_rate: 'Blind loss rate',
+  button_win_rate: 'Button win rate',
+  crash_rate: 'Crash rate',
+  illegal_action_rate: 'Illegal action rate',
+  timeout_rate: 'Timeout rate',
+  average_decision_latency_ms: 'Average decision latency',
+  p95_decision_latency_ms: 'p95 decision latency',
+  p99_decision_latency_ms: 'p99 decision latency',
+  bot_error_count: 'Bot error count',
+  decision_count: 'Decision count'
+};
+
+const evtSrc = new EventSource('/stream');
+evtSrc.onmessage = e => {
+  const { msg, kind } = JSON.parse(e.data);
+  addLog(msg, kind);
+};
+
+function addLog(msg, kind='info') {
+  const el = document.getElementById('log');
+  const d = document.createElement('div');
+  d.className = kind;
+  d.textContent = '> ' + msg;
+  el.appendChild(d);
+  el.scrollTop = el.scrollHeight;
+}
+
+function clearLog() {
+  document.getElementById('log').innerHTML = '';
+}
+
+function setRunning(v) {
+  running = v;
+  runButtons.forEach(id => document.getElementById(id).disabled = v);
+  const pill = document.getElementById('status');
+  pill.textContent = v ? 'RUNNING' : 'IDLE';
+  pill.className = 'status-pill' + (v ? ' running' : '');
+}
+
+async function postRun(url) {
+  if (running) return null;
+  setRunning(true);
+  try {
+    const res = await fetch(url, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `Request failed: ${res.status}`);
+    return data;
+  } catch (err) {
+    addLog(err.message, 'err');
+    return null;
+  } finally {
+    setRunning(false);
+  }
+}
+
+async function runSingle() {
+  const data = await postRun('/run/match');
+  if (!data) return;
+  updateBoard(data.standings);
+  updateReplay(data.hands);
+}
+
+async function runTournament() {
+  const data = await postRun('/run/tournament');
+  if (!data) return;
+  updateBoard(data.standings);
+  document.getElementById('round-label').textContent =
+    `Round ${data.round} complete - ${data.finalists} finalists selected`;
+}
+
+async function runConfiguredHands() {
+  const data = await postRun('/run/hands');
+  if (!data) return;
+  updateBoard(data.standings);
+  updateMetrics(data.metrics);
+  clearReplay();
+  document.getElementById('round-label').textContent = `${runHandsCount}-hand metrics complete`;
+}
+
+async function runRoundRobin() {
+  const data = await postRun('/run/round_robin');
+  if (!data) return;
+  updateBoard(data.standings);
+  updateMetrics(data.metrics);
+  clearReplay();
+  document.getElementById('round-label').textContent =
+    `Round robin complete - ${data.tables} tables`;
+}
+
+function updateBoard(standings) {
+  const board = document.getElementById('board');
+  board.innerHTML = `<div class="row header"><span>#</span><span>Bot</span><span>Chip Δ</span><span>Matches</span></div>`;
+  const max = Math.max(...standings.map(s => Math.abs(s.cumulative_delta)), 1);
+  standings.forEach((s, i) => {
+    const delta = s.cumulative_delta;
+    const pct = Math.min(Math.abs(delta) / max * 100, 100);
+    const sign = delta >= 0 ? '+' : '';
+    const dClass = delta >= 0 ? 'pos' : 'neg';
+    const rClass = i < 3 ? 'top' : '';
+    board.innerHTML += `
+      <div class="row">
+        <span class="rank ${rClass}">${i + 1}</span>
+        <span>${escapeHtml(s.bot_id)}</span>
+        <span class="delta ${dClass}">${sign}${delta.toLocaleString()}</span>
+        <span style="color:#3a6e3a">${s.matches_played}</span>
+      </div>
+      <div style="padding:0 0 4px 36px">
+        <div class="bar-wrap"><div class="bar" style="width:${pct}%;${delta < 0 ? 'background:#ff4444' : ''}"></div></div>
+      </div>`;
+  });
+}
+
+function updateReplay(hands) {
+  if (!hands || hands.length === 0) return;
+  const el = document.getElementById('replay');
+  el.innerHTML = '';
+  document.getElementById('hand-count').textContent = `(${hands.length} hands)`;
+
+  const show = hands.slice(-20).reverse();
+  show.forEach(h => {
+    const r = h.result || h;
+    const winner = r.winners?.map(w => w.bot_id).join(', ') || '?';
+    const community = r.community_cards?.join(' ') || '-';
+    const actions = (r.action_log || [])
+      .filter(a => !['small_blind', 'big_blind'].includes(a.action))
+      .slice(-6);
+
+    let html = `<div class="hand-card">`;
+    html += `<div class="hand-meta">Hand #${(h.hand_num || 0) + 1} - ${r.street} - pot ${r.pot?.toLocaleString()} - winner: ${escapeHtml(winner)}</div>`;
+    if (community !== '-') html += `<div class="community">${escapeHtml(community)}</div>`;
+    actions.forEach(a => {
+      const cls = ['fold', 'raise', 'all_in'].includes(a.action) ? a.action : '';
+      const amt = a.amount ? ` ${a.amount.toLocaleString()}` : '';
+      html += `<div class="action-line ${cls}">seat${a.seat} ${escapeHtml(a.action)}${amt}</div>`;
+    });
+    html += `</div>`;
+    el.innerHTML += html;
+  });
+}
+
+function clearReplay() {
+  document.getElementById('replay').innerHTML = '<div class="empty">Quiet metrics run: hand replay omitted.</div>';
+  document.getElementById('hand-count').textContent = '';
+  collapseReplay();
+}
+
+function toggleReplay() {
+  document.getElementById('replay-drawer').classList.toggle('expanded');
+}
+
+function collapseReplay() {
+  document.getElementById('replay-drawer').classList.remove('expanded');
+}
+
+function updateMetrics(metrics) {
+  const el = document.getElementById('metrics');
+  const summary = document.getElementById('metrics-summary');
+  if (!metrics || !metrics.bots || metrics.bots.length === 0) {
+    el.innerHTML = '<div class="empty">No metrics returned.</div>';
+    summary.textContent = '';
+    return;
+  }
+
+  summary.textContent = `(${metrics.summary.matches} matches, ${metrics.summary.hands} hands, BB ${metrics.summary.big_blind})`;
+  el.innerHTML = '<div class="metrics-head"><span>Bot</span><span>Hands</span><span>Chip Δ</span><span>bb/100</span></div>';
+  metrics.bots.forEach(bot => {
+    const core = bot.groups['Core performance metrics'];
+    let html = '<div class="bot-metrics">';
+    html += `<div class="bot-summary"><strong>${escapeHtml(bot.bot_id)}</strong><span>${bot.hands}</span><span>${signed(bot.chip_delta)}</span><span>${fmt(core.bb_per_100)}</span></div>`;
+    Object.entries(bot.groups).forEach(([groupName, values]) => {
+      html += `<h3>${escapeHtml(groupName)}</h3>`;
+      html += `<div class="metric-grid">${renderMetrics(values)}</div>`;
+    });
+    html += '</div>';
+    el.innerHTML += html;
+  });
+}
+
+function renderMetrics(values) {
+  return Object.entries(values).map(([key, value]) => {
+    const label = labels[key] || key.replaceAll('_', ' ');
+    if (key === 'by_position' && value && typeof value === 'object') {
+      return renderByPosition(label, value);
+    }
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      return `<div class="metric"><span>${escapeHtml(label)}</span><span class="nested">${renderObject(value)}</span></div>`;
+    }
+    return `<div class="metric"><span>${escapeHtml(label)}</span><span>${fmt(value, key)}</span></div>`;
+  }).join('');
+}
+
+function renderByPosition(label, positions) {
+  const order = ['BTN', 'SB', 'BB', 'UTG', 'UTG+1', 'MP', 'LJ', 'HJ', 'CO', 'UNK'];
+  const sorted = Object.entries(positions).sort(([a], [b]) => {
+    const ai = order.includes(a) ? order.indexOf(a) : order.length;
+    const bi = order.includes(b) ? order.indexOf(b) : order.length;
+    return ai - bi || a.localeCompare(b);
+  });
+  const cols = sorted.map(([pos, values]) => {
+    return `<div class="position-col">
+      <div class="position-title">${escapeHtml(pos)}</div>
+      <div class="position-stat"><span>Hands</span><span>${fmt(values.hands, 'hands')}</span></div>
+      <div class="position-stat"><span>bb/100</span><span>${fmt(values.bb_per_100, 'bb_per_100')}</span></div>
+      <div class="position-stat"><span>VPIP</span><span>${fmt(values.vpip, 'vpip')}</span></div>
+      <div class="position-stat"><span>PFR</span><span>${fmt(values.pfr, 'pfr')}</span></div>
+      <div class="position-stat"><span>Chip Δ</span><span>${signed(values.chip_delta || 0)}</span></div>
+    </div>`;
+  }).join('');
+  return `<div class="metric metric-wide"><span>${escapeHtml(label)}</span><div class="position-columns">${cols}</div></div>`;
+}
+
+function renderObject(obj) {
+  return Object.entries(obj).map(([k, v]) => {
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      const bits = Object.entries(v)
+        .map(([innerKey, innerValue]) => `${innerKey}: ${fmt(innerValue, innerKey)}`)
+        .join(', ');
+      return `${escapeHtml(k)} (${escapeHtml(bits)})`;
+    }
+    return `${escapeHtml(k)}: ${fmt(v, k)}`;
+  }).join('<br>');
+}
+
+function fmt(value, key='') {
+  if (value === null || value === undefined) return '-';
+  if (typeof value === 'number') {
+    const suffix = key.includes('latency') ? ' ms' : '';
+    return Number.isInteger(value) ? value.toLocaleString() + suffix : value.toFixed(3) + suffix;
+  }
+  return escapeHtml(String(value));
+}
+
+function signed(value) {
+  const sign = value >= 0 ? '+' : '';
+  return `${sign}${value.toLocaleString()}`;
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+</script>
+</body>
+</html>

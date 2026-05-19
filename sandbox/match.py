@@ -99,6 +99,7 @@ class BotProcess:
         self.bot_id   = bot_id
         self.bot_path = bot_path
         self.errors   = []
+        self.last_decision = None
         self._cleanup_dir = None
 
         try:
@@ -153,7 +154,16 @@ class BotProcess:
         )
 
     def act(self, game_state):
+        started = time.time()
+        meta = {
+            "latency_ms": 0,
+            "error": None,
+            "timeout": False,
+            "crash": False,
+        }
         if self._proc is None:
+            meta.update({"error": "no_process", "crash": True})
+            self.last_decision = meta
             return {"action": "fold", "error": "no_process"}
         try:
             self._proc.stdin.write(json.dumps(game_state) + "\n")
@@ -164,10 +174,17 @@ class BotProcess:
             action = json.loads(line.strip())
             if "error" in action:
                 self.errors.append(action["error"])
+                meta["error"] = action["error"]
+                meta["timeout"] = action["error"] == "timeout"
+                meta["crash"] = action["error"] not in (None, "timeout")
             return action
         except Exception as e:
             self.errors.append(str(e))
+            meta.update({"error": str(e), "crash": True})
             return {"action": "fold", "error": str(e)}
+        finally:
+            meta["latency_ms"] = round((time.time() - started) * 1000, 3)
+            self.last_decision = meta
 
     def warmup(self):
         """One-shot 'wake up the bot before hand 1' call.
@@ -286,21 +303,53 @@ def run_match(match_id, bot_paths, n_hands=400, verbose=False, seed=None):
 def _play_hand(engine, procs, active_bots, match_action_log, hand_num, verbose):
     state = _inject_match_log(engine.start_hand(), match_action_log)
     steps = 0
+    decision_log = []
 
     while state.get("type") == "action_request":
         seat   = state["seat_to_act"]
         bot_id = active_bots[seat]
         action = procs[bot_id].act(state)
+        decision_meta = procs[bot_id].last_decision or {}
+        validated = engine._validate(seat, action)
+        raw_action = str(action.get("action", "fold")).lower().strip()
+        try:
+            raw_amount = int(action.get("amount") or 0)
+        except (TypeError, ValueError):
+            raw_amount = 0
+        legal_actions = {"fold", "check", "call", "raise", "all_in"}
+        illegal_action = (
+            raw_action not in legal_actions
+            or raw_action != validated.action
+            or (
+                raw_action == "raise"
+                and raw_amount != validated.amount
+            )
+        )
 
         if verbose:
             print("  [" + bot_id + "] " + str(action), file=sys.stderr)
 
+        decision_log.append({
+            "hand_num": hand_num,
+            "seat": seat,
+            "bot_id": bot_id,
+            "street": state.get("street"),
+            "raw_action": raw_action,
+            "raw_amount": raw_amount,
+            "action": validated.action,
+            "amount": validated.amount,
+            "illegal_action": illegal_action,
+            "runner_error": decision_meta.get("error"),
+            "timeout": bool(decision_meta.get("timeout")),
+            "crash": bool(decision_meta.get("crash")),
+            "latency_ms": decision_meta.get("latency_ms", 0),
+        })
         match_action_log.append({
             "hand_num": hand_num,
             "seat":     seat,
             "bot_id":   bot_id,
-            "action":   action.get("action"),
-            "amount":   action.get("amount"),
+            "action":   validated.action,
+            "amount":   validated.amount,
         })
 
         state = _inject_match_log(engine.apply_action(seat, action), match_action_log)
@@ -309,6 +358,8 @@ def _play_hand(engine, procs, active_bots, match_action_log, hand_num, verbose):
         if steps > 1000:
             raise RuntimeError("Hand exceeded 1000 steps: " + engine.hand_id)
 
+    state["decision_log"] = decision_log
+    state["starting_stacks"] = dict(engine._starting_stacks)
     return state
 
 
