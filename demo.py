@@ -39,7 +39,7 @@ BOT_PATHS = {
     "BlackRain79": "bots/rule_based_TAG/bot.py",
 }
 
-MY_BOT_PATH = "bots/my_bot/bot.py"
+MY_BOT_PATH = "bots/rule_based_TAG/bot.py"
 RUN_HANDS_COUNT = 500
 ROUND_ROBIN_HANDS = 500
 
