@@ -31,14 +31,14 @@ app = Flask(__name__)
 # ---------------------------------------------------------------------------
 
 BOT_PATHS = {
-    # "The Aggressor": "bots/aggressor.py",
+    "The Aggressor": "bots/aggressor.py",
     "The Mathematician": "bots/mathematician.py",
     # "The Shark": "bots/shark.py",
     # "Loose passive": "bots/loose_passive.py",
     "The Complete Bot": "bots/my_bots/complete.py",
     "Complete no exploit": "bots/my_bots/complete_no_opponent_model.py",
     "BlackRain79": "bots/my_bots/blackrain79.py",
-    "G5 Bot": "bots/my_bots/g5_bot.py",
+    # "G5 Bot": "bots/my_bots/g5-bot.py",
     "Randomized Bot": "bots/my_bots/complete_randomized.py",
 }
 

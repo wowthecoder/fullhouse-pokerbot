@@ -17,3 +17,5 @@ node_modules/
 venv/
 .codex
 .agents
+
+g5-poker-bot-main/

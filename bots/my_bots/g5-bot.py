@@ -1,21 +1,24 @@
 """
-G5-inspired Fullhouse bot, condensed into one self-contained file.
+G5-inspired Fullhouse bot, condensed into one tournament-safe Python module.
 
 Core ideas implemented here:
-  * 100bb preflop chart layer, using compact 6-max ranges.
-  * Lightweight Bayesian opponent modelling from observed action frequencies.
-  * Combo-range construction and range updates from opponent actions.
+  * 100bb preflop chart layer, loaded from compact generated G5 chart data.
+  * Bayesian opponent modelling from generated population priors plus live counts.
+  * Combo-range construction with G5-style range cuts from observed actions.
   * EV comparison between fold/check/call and bet/raise.
-  * Time/depth-limited one-step search: hero action -> opponent fold/call/raise
-    response -> rollout/showdown equity cutoff.
+  * Time/depth-limited miximax search: hero action -> opponent fold/call/raise
+    response -> chance/showdown equity cutoff.
 
-The implementation intentionally avoids file I/O, network, subprocesses, threads,
-and dynamic code execution. It only needs the Fullhouse `decide(game_state)` API.
+The implementation avoids network, subprocesses, threads, and dynamic code
+execution. It loads optional data files at import time, then only needs the
+Fullhouse `decide(game_state)` API.
 """
 
 import bisect
 import itertools
+import json
 import math
+import os
 import random
 import time
 from collections import defaultdict
@@ -37,7 +40,40 @@ SUITS = "shdc"
 RANK_VALUE = {r: i + 2 for i, r in enumerate(RANKS)}
 VALUE_RANK = {v: r for r, v in RANK_VALUE.items()}
 DECK = [r + s for r in RANKS for s in SUITS]
+CARD_INDEX = {c: i for i, c in enumerate(DECK)}
+HOLE_INDEX_SIZE = 52 * 52
 EVAL7_CARD_CACHE = {}
+
+
+def _load_data_file(name, binary=False):
+    here = os.path.dirname(__file__)
+    for data_dir in (os.path.join(here, "data"), os.path.join(here, "g5_data")):
+        path = os.path.join(data_dir, name)
+        try:
+            mode = "rb" if binary else "r"
+            kwargs = {} if binary else {"encoding": "utf-8"}
+            with open(path, mode, **kwargs) as f:
+                return f.read()
+        except Exception:
+            pass
+    return b"" if binary else ""
+
+
+def _load_json_data(name, default):
+    raw = _load_data_file(name, binary=False)
+    if not raw:
+        return default
+    try:
+        return json.loads(raw)
+    except Exception:
+        return default
+
+
+G5_PREFLOP_CHARTS = _load_json_data("preflop_charts_100bb.json", {})
+G5_PRIORS = _load_json_data("opponent_priors_6max.json", {})
+G5_PREFLOP_EQUITY = _load_data_file("preflop_equity_u8.bin", binary=True)
+if len(G5_PREFLOP_EQUITY) != HOLE_INDEX_SIZE * HOLE_INDEX_SIZE:
+    G5_PREFLOP_EQUITY = b""
 
 
 def clamp(x, lo, hi):
@@ -83,6 +119,32 @@ def clean_cards(cards):
 
 def card_value(card):
     return RANK_VALUE[card[0]]
+
+
+def canonical_hole_index(cards):
+    cards = clean_cards(cards)
+    if len(cards) < 2:
+        return -1
+    c1 = CARD_INDEX.get(cards[0], -1)
+    c2 = CARD_INDEX.get(cards[1], -1)
+    if c1 < 0 or c2 < 0:
+        return -1
+    if c1 > c2:
+        c1, c2 = c2, c1
+    return c1 * 52 + c2
+
+
+def preflop_equity_lookup(hero_cards, villain_cards):
+    if not G5_PREFLOP_EQUITY:
+        return None
+    hero_idx = canonical_hole_index(hero_cards)
+    villain_idx = canonical_hole_index(villain_cards)
+    if hero_idx < 0 or villain_idx < 0:
+        return None
+    val = G5_PREFLOP_EQUITY[hero_idx * HOLE_INDEX_SIZE + villain_idx]
+    if val <= 0:
+        return None
+    return val / 255.0
 
 
 def normalize_hand(cards):
@@ -373,17 +435,20 @@ class OpponentModel:
         self.total_actions = 0
         self.preflop_vpip = 0
         self.preflop_raises = 0
+        self.context_actions = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
         self.response_fold = defaultdict(int)
         self.response_call = defaultdict(int)
         self.response_raise = defaultdict(int)
 
-    def record(self, street, action):
+    def record(self, street, action, context_index=None):
         street = street if street in ("preflop", "flop", "turn", "river") else "unknown"
         action = normalize_action_name(action)
         if not action:
             return
         self.actions[street][action] += 1
         self.total_actions += 1
+        if context_index is not None:
+            self.context_actions[street][str(context_index)][action] += 1
         if street == "preflop" and action in ("call", "raise", "bet", "all_in"):
             self.preflop_vpip += 1
             if action in ("raise", "bet", "all_in"):
@@ -395,32 +460,68 @@ class OpponentModel:
         elif action in ("raise", "bet", "all_in"):
             self.response_raise[street] += 1
 
+    def action_distribution(self, street, context_index=None):
+        street = street if street in ("preflop", "flop", "turn", "river") else "unknown"
+        priors = G5_PRIORS.get("preflop" if street == "preflop" else "postflop", {})
+        prior = priors.get(str(context_index), {}) if context_index is not None else {}
+        br = float(prior.get("br", 0))
+        cc = float(prior.get("cc", 0))
+        fo = float(prior.get("fold", 0))
+        total = br + cc + fo
+        if total > 0:
+            # Compress millions of population samples into a useful prior that
+            # live evidence can still move within one match.
+            prior_weight = 24.0
+            br, cc, fo = prior_weight * br / total, prior_weight * cc / total, prior_weight * fo / total
+        else:
+            br, cc, fo = 3.0, 4.0, 3.0
+
+        live = self.context_actions[street].get(str(context_index), {}) if context_index is not None else {}
+        if not live:
+            live = self.actions[street]
+        br += live.get("raise", 0) + live.get("bet", 0) + live.get("all_in", 0)
+        cc += live.get("call", 0) + live.get("check", 0)
+        fo += live.get("fold", 0)
+        total = max(1.0, br + cc + fo)
+        return {
+            "raise": clamp(br / total, 0.01, 0.90),
+            "call": clamp(cc / total, 0.01, 0.94),
+            "fold": clamp(fo / total, 0.01, 0.94),
+        }
+
     def fold_rate(self, street):
-        # Beta prior: most unknown players fold around 38-42% when facing pressure.
+        prior = self.action_distribution(street)
         f = self.response_fold[street]
         c = self.response_call[street]
         r = self.response_raise[street]
-        return (4.0 + f) / (10.0 + f + c + r)
+        return (prior["fold"] * 12.0 + f) / (12.0 + f + c + r)
 
     def call_rate(self, street):
+        prior = self.action_distribution(street)
         f = self.response_fold[street]
         c = self.response_call[street]
         r = self.response_raise[street]
-        return (4.5 + c) / (10.0 + f + c + r)
+        return (prior["call"] * 12.0 + c) / (12.0 + f + c + r)
 
     def aggression(self, street):
+        prior = self.action_distribution(street)
         counts = self.actions[street]
         raises = counts.get("raise", 0) + counts.get("bet", 0) + counts.get("all_in", 0)
         passive = counts.get("call", 0) + counts.get("check", 0)
-        return (2.0 + raises) / (8.0 + raises + passive)
+        return (prior["raise"] * 12.0 + raises) / (12.0 + raises + passive)
 
     def looseness(self):
         # A rough VPIP proxy from actions, smoothed heavily.
-        return clamp((8.0 + self.preflop_vpip) / (35.0 + self.total_actions), 0.15, 0.65)
+        base = G5_PRIORS.get("base", {})
+        prior = 0.29
+        if base.get("vpip_total", 0) > 0:
+            prior = base.get("vpip_pos", 0) / float(base.get("vpip_total", 1))
+        return clamp((prior * 35.0 + self.preflop_vpip) / (35.0 + self.total_actions), 0.15, 0.65)
 
 
 OPPONENTS = defaultdict(OpponentModel)
 PROCESSED_LOG_LENGTH = {}
+HAND_PREFLOP_LOG_LENGTH = {}
 
 
 def normalize_action_name(action):
@@ -498,28 +599,130 @@ def player_id_for_seat(state, seat):
     return "seat_%s" % seat
 
 
+def infer_entry_street(state, index, entry):
+    explicit = entry_get(entry, "street", "round", default=None)
+    if explicit in ("preflop", "flop", "turn", "river"):
+        return explicit
+    street = str(state.get("street", "preflop")).lower()
+    if street == "preflop":
+        return "preflop"
+    hand_id = str(state.get("hand_id", "unknown"))
+    preflop_len = HAND_PREFLOP_LOG_LENGTH.get(hand_id)
+    if preflop_len is not None and index < preflop_len:
+        return "preflop"
+    action = normalize_action_name(entry_get(entry, "action", "type", "move", default=""))
+    if action in ("small_blind", "big_blind", "blind", "post"):
+        return "preflop"
+    return street
+
+
+def position_index(pos):
+    return {"SB": 0, "BB": 1, "LJ": 2, "HJ": 3, "CO": 4, "BTN": 5}.get(pos, 4)
+
+
+def preflop_context_index(state, seat, action_so_far=None):
+    actions = action_so_far if action_so_far is not None else actions_for_current_hand(state)
+    positions = seat_positions(state)
+    pos = positions.get(seat, "CO")
+    num_callers = 0
+    num_raises = 0
+    previous_action = "fold"
+    active = max(2, len(active_players(state)))
+    for a in actions:
+        if not a:
+            continue
+        if a["street"] != "preflop":
+            continue
+        if a["seat"] == seat:
+            previous_action = a["action"]
+        if a["action"] == "call":
+            num_callers += 1
+        elif a["action"] in ("raise", "bet", "all_in") and a["amount"] > estimate_big_blind(state):
+            num_raises += 1
+
+    if previous_action == "fold":
+        bucket = 0
+        if num_raises == 0:
+            bucket = 0 if num_callers == 0 else 1
+        elif num_raises == 1:
+            bucket = 2 if num_callers == 0 else 3
+        else:
+            bucket = 4
+        return 5 * position_index(pos) + bucket
+
+    in_pos = 0 if positions else 1
+    if pos in ("BTN", "CO"):
+        in_pos = 0
+    elif pos in ("SB", "BB"):
+        in_pos = 1
+    previous_bucket = 0 if previous_action in ("check", "call") else 1
+    player_bucket = 0 if active == 2 else 1
+    raise_bucket = 0 if num_raises == 1 and num_callers == 0 else 1 if num_raises == 1 else 2
+    return 30 + 12 * previous_bucket + 6 * in_pos + 3 * player_bucket + raise_bucket
+
+
+def postflop_context_index(state, seat, action_so_far=None):
+    actions = action_so_far if action_so_far is not None else actions_for_current_hand(state)
+    street = str(state.get("street", "flop")).lower()
+    street_bucket = {"flop": 0, "turn": 1, "river": 2}.get(street, 0)
+    positions = seat_positions(state)
+    in_position = positions.get(seat) in ("BTN", "CO")
+    num_bets = 0
+    player_actions = [a for a in actions if a and a["seat"] == seat and a["street"] == street]
+    prev_action = "check"
+    for a in actions:
+        if not a:
+            continue
+        if a["street"] != street:
+            continue
+        if a["action"] in ("raise", "bet", "all_in"):
+            num_bets += 1
+        if a["seat"] == seat:
+            prev_action = a["action"]
+    round_bucket = 0 if not player_actions else 1
+    if prev_action in ("raise", "bet", "all_in"):
+        prev_bucket = 0
+    elif prev_action == "call":
+        prev_bucket = 1
+    else:
+        prev_bucket = 2
+    bet_bucket = 0 if num_bets == 0 else 1 if num_bets == 1 else 2
+    pos_bucket = 1 if in_position else 0
+    player_bucket = 0 if len(opponent_players(state)) <= 1 else 1
+    return player_bucket + 2 * pos_bucket + 4 * bet_bucket + 12 * prev_bucket + 36 * round_bucket + 72 * street_bucket
+
+
 def update_opponent_models(state):
     hand_id = str(state.get("hand_id", "unknown"))
     action_log = state.get("action_log") or []
     last_len = PROCESSED_LOG_LENGTH.get(hand_id, 0)
     hero_seat = safe_int(state.get("seat_to_act"), -1)
-    for entry in action_log[last_len:]:
+    seen = []
+    for index, entry in enumerate(action_log):
         seat = entry_get(entry, "seat", "player", "player_seat", "actor", "seat_id", default=None)
         if seat is None:
+            seen.append(None)
             continue
         seat = safe_int(seat, -999)
+        action = entry_get(entry, "action", "type", "move", default="")
+        street = infer_entry_street(state, index, entry)
+        context_index = preflop_context_index(state, seat, seen) if street == "preflop" else postflop_context_index(state, seat, seen)
+        seen.append({"seat": seat, "action": normalize_action_name(action), "street": street, "amount": safe_int(entry_get(entry, "amount", "bet", "to", "raise_to", default=0), 0)})
+        if index < last_len:
+            continue
         if seat == hero_seat:
             continue
-        action = entry_get(entry, "action", "type", "move", default="")
-        street = entry_get(entry, "street", "round", default=state.get("street", "unknown"))
         if normalize_action_name(action) == "post":
             continue
-        OPPONENTS[player_id_for_seat(state, seat)].record(street, action)
+        OPPONENTS[player_id_for_seat(state, seat)].record(street, action, context_index)
     PROCESSED_LOG_LENGTH[hand_id] = len(action_log)
+    if str(state.get("street", "preflop")).lower() == "preflop":
+        HAND_PREFLOP_LOG_LENGTH[hand_id] = len(action_log)
     # Keep memory bounded over long matches.
     if len(PROCESSED_LOG_LENGTH) > 2000:
         for key in list(PROCESSED_LOG_LENGTH.keys())[:500]:
             PROCESSED_LOG_LENGTH.pop(key, None)
+            HAND_PREFLOP_LOG_LENGTH.pop(key, None)
 
 
 # ---------------------------------------------------------------------------
@@ -620,10 +823,10 @@ def hero_position(state):
 
 def actions_for_current_hand(state):
     out = []
-    for entry in state.get("action_log") or []:
+    for index, entry in enumerate(state.get("action_log") or []):
         seat = entry_get(entry, "seat", "player", "player_seat", "actor", "seat_id", default=None)
         action = normalize_action_name(entry_get(entry, "action", "type", "move", default=""))
-        street = entry_get(entry, "street", "round", default=state.get("street", "unknown"))
+        street = infer_entry_street(state, index, entry)
         amount = safe_int(entry_get(entry, "amount", "bet", "to", "raise_to", default=0), 0)
         if seat is not None and action:
             out.append({"seat": safe_int(seat, -999), "action": action, "street": street, "amount": amount})
@@ -656,12 +859,16 @@ def preflop_summary(state):
         first_raiser_pos = positions.get(raises[0]["seat"], "LJ")
         if first_raiser_pos == "UTG":
             first_raiser_pos = "LJ"
+    raiser_positions = [positions.get(r["seat"], "LJ") for r in raises]
     return {
         "bb": bb,
         "raise_count": len([r for r in raises if r["seat"] != hero]),
         "total_raise_count": len(raises),
         "call_count": len([c for c in calls if c["seat"] != hero]),
         "first_raiser_pos": first_raiser_pos,
+        "last_raiser_pos": (positions.get(raises[-1]["seat"], "LJ") if raises else None),
+        "raiser_positions": raiser_positions,
+        "hero_raised": any(r["seat"] == hero for r in raises),
         "hero_voluntary": hero_voluntary,
     }
 
@@ -763,6 +970,54 @@ def range_weight_postflop(combo, board, action, model):
     return 1.0
 
 
+def combo_rank_percentile(combo, board):
+    c1, c2, key, score = combo
+    level = made_hand_level([c1, c2], board)
+    draws = draw_flags([c1, c2], board)
+    draw_power = 0.0
+    if draws["flush_draw"]:
+        draw_power += 0.12
+    if draws["straight_draw"]:
+        draw_power += 0.10
+    if draws["nut_flush_draw"]:
+        draw_power += 0.05
+    if draws["overcards"] >= 2:
+        draw_power += 0.03
+    # Approximate the sorted-hole-card position used by original G5 range cuts:
+    # high made hands live near 1.0, air near 0.0, with draws nudged upward.
+    return clamp(level / 8.0 * 0.82 + score * 0.15 + draw_power, 0.0, 1.0)
+
+
+def smooth_action_multiplier(action, strength_pct, raise_prob, call_prob, street):
+    action = normalize_action_name(action)
+    raise_prob = clamp(raise_prob, 0.01, 0.90)
+    call_prob = clamp(call_prob, 0.01, 0.94)
+    fold_prob = clamp(1.0 - raise_prob - call_prob, 0.01, 0.94)
+    top = 1.0 - strength_pct
+    if action in ("raise", "bet", "all_in"):
+        border = raise_prob
+        if top <= border:
+            return 1.8
+        if top <= border + 0.16:
+            return 0.45 + (border + 0.16 - top) / 0.16 * 1.1
+        return 0.06 if action == "all_in" else 0.12
+    if action == "call":
+        low = raise_prob
+        high = raise_prob + call_prob
+        if low <= top <= high:
+            return 1.45
+        if top < low:
+            return 0.55
+        return 0.20
+    if action == "fold":
+        return 1.55 if top >= 1.0 - fold_prob else 0.08
+    if action == "check":
+        if street == "preflop":
+            return smooth_action_multiplier("call", strength_pct, raise_prob, call_prob, street)
+        return 1.25 if top > raise_prob else 0.65
+    return 1.0
+
+
 def build_range_for_seat(state, seat, known_cards, board):
     pid = player_id_for_seat(state, seat)
     model = OPPONENTS[pid]
@@ -784,7 +1039,11 @@ def build_range_for_seat(state, seat, known_cards, board):
                     raise_depth += 1
                 w *= range_weight_preflop(key, score, a["action"], raise_depth, model)
             else:
-                w *= range_weight_postflop((c1, c2, key, score), board, a["action"], model)
+                combo = (c1, c2, key, score)
+                ctx = postflop_context_index(state, seat, actions)
+                dist = model.action_distribution(a["street"], ctx)
+                w *= range_weight_postflop(combo, board, a["action"], model)
+                w *= smooth_action_multiplier(a["action"], combo_rank_percentile(combo, board), dist["raise"], dist["call"], a["street"])
         if w > 0.0001:
             items.append((c1, c2, key, score, w))
     if not items:
@@ -839,6 +1098,20 @@ def estimate_equity(hero_cards, board, ranges, samples, rng, deadline):
     points = 0.0
     trials = 0
     base_deck = [c for c in DECK if c not in known0]
+
+    if len(board) == 0 and len(ranges) == 1 and G5_PREFLOP_EQUITY:
+        total_w = 0.0
+        eq_w = 0.0
+        for c1, c2, _, _, w in ranges[0]["items"]:
+            if c1 in known0 or c2 in known0:
+                continue
+            eq = preflop_equity_lookup(hero_cards, [c1, c2])
+            if eq is None:
+                continue
+            total_w += w
+            eq_w += w * eq
+        if total_w > 0:
+            return clamp(eq_w / total_w, 0.0, 1.0)
 
     # On a river heads-up, exact-ish enumeration over villain range is cheap enough.
     if need_board == 0 and len(ranges) == 1:
@@ -982,6 +1255,95 @@ def postflop_bet_sizes(state, level, draws, spr, texture):
     return out[:3]
 
 
+def chart_cell_action(state, family, spot_key, hand_key):
+    chart = (G5_PREFLOP_CHARTS.get(family) or {}).get(spot_key)
+    if chart is None:
+        return None
+    cell = chart.get(hand_key)
+    if cell is None:
+        return "fold"
+    all_in = safe_int(cell.get("all_in"), 0)
+    raise_prob = safe_int(cell.get("raise"), 0)
+    call_prob = safe_int(cell.get("call"), 0)
+    roll = stable_seed(state.get("hand_id", ""), tuple(state.get("your_cards") or ()), family, spot_key, hand_key) % 100
+    if roll < all_in:
+        return "all_in"
+    if roll < all_in + raise_prob:
+        return "raise"
+    if roll < all_in + raise_prob + call_prob:
+        return "call"
+    return "fold"
+
+
+def chart_preflop_decision(state, key, pos, summary):
+    if not G5_PREFLOP_CHARTS:
+        return None
+    raise_count = summary["raise_count"]
+    total_raise_count = summary["total_raise_count"]
+    current_bet = safe_int(state.get("current_bet"), 0)
+    amount_owed = safe_int(state.get("amount_owed"), 0)
+    bb = summary["bb"]
+    can_check = bool(state.get("can_check", False)) or amount_owed <= 0
+    limpers = summary["call_count"]
+
+    unopened = raise_count == 0 and current_bet <= bb * 1.25 and amount_owed <= bb * 1.25
+    if unopened:
+        action = chart_cell_action(state, "rfi", pos, key)
+        if action is None:
+            return None
+        if action == "all_in":
+            return legal_action(state, "all_in")
+        if action == "raise":
+            return legal_action(state, "raise", open_raise_size(state, pos, limpers))
+        if action == "call":
+            return legal_action(state, "call" if not can_check else "check")
+        return legal_action(state, "check" if can_check else "fold")
+
+    if total_raise_count <= 1 or raise_count == 1:
+        opener = summary["first_raiser_pos"] or "LJ"
+        spot = "%s_vs_%s" % (pos, opener)
+        action = chart_cell_action(state, "vs_open", spot, key)
+        if action is None:
+            return None
+        ip = is_in_position(pos, opener)
+        if action == "all_in":
+            return legal_action(state, "all_in")
+        if action == "raise":
+            return legal_action(state, "raise", three_bet_size(state, ip, max(0, limpers - 1)))
+        if action == "call":
+            return legal_action(state, "call")
+        return legal_action(state, "check" if can_check else "fold")
+
+    raisers = summary.get("raiser_positions") or []
+    if total_raise_count == 2 and summary.get("hero_raised"):
+        aggressor = summary["last_raiser_pos"] or (raisers[-1] if raisers else "HJ")
+        action = chart_cell_action(state, "vs_reraise", "%s_vs_%s" % (pos, aggressor), key)
+        if action is None:
+            return None
+        if action == "all_in":
+            return legal_action(state, "all_in")
+        if action == "raise":
+            return legal_action(state, "raise", four_bet_size(state, pos not in ("SB", "BB")))
+        if action == "call":
+            return legal_action(state, "call")
+        return legal_action(state, "check" if can_check else "fold")
+
+    if total_raise_count == 2 and len(raisers) >= 2:
+        spot = "%s_vs_%s_%s" % (pos, raisers[0], raisers[1])
+        action = chart_cell_action(state, "vs_two_bets", spot, key)
+        if action is None:
+            return None
+        if action == "all_in":
+            return legal_action(state, "all_in")
+        if action == "raise":
+            return legal_action(state, "raise", four_bet_size(state, pos not in ("SB", "BB")))
+        if action == "call":
+            return legal_action(state, "call")
+        return legal_action(state, "check" if can_check else "fold")
+
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Preflop policy: chart-first, 100bb-aware fallback
 # ---------------------------------------------------------------------------
@@ -1002,6 +1364,10 @@ def preflop_decision(state, rng):
     raise_count = summary["raise_count"]
     total_raise_count = summary["total_raise_count"]
     limpers = summary["call_count"]
+
+    chart_action = chart_preflop_decision(state, key, pos, summary)
+    if chart_action is not None:
+        return chart_action
 
     # BB option after limps: raise the charted isolation range, otherwise check.
     if can_check and pos == "BB" and limpers > 0 and raise_count == 0:
@@ -1160,8 +1526,11 @@ def estimate_response_probs(state, bet_to, ranges, level, draws, texture, model)
     per_fold = []
     per_raise = []
     for p in opps:
-        pm = OPPONENTS[player_id_for_seat(state, safe_int(p.get("seat"), -999))]
-        f = pm.fold_rate(street)
+        seat = safe_int(p.get("seat"), -999)
+        pm = OPPONENTS[player_id_for_seat(state, seat)]
+        ctx = postflop_context_index(state, seat)
+        dist = pm.action_distribution(street, ctx)
+        f = (pm.fold_rate(street) + dist["fold"]) * 0.5
         # Size pressure and board texture adjustments.
         f += (bet_frac - 0.55) * 0.18
         f += 0.06 if texture["wetness"] < 0.3 else -0.04 if texture["wetness"] > 0.65 else 0.0
@@ -1170,7 +1539,7 @@ def estimate_response_probs(state, bet_to, ranges, level, draws, texture, model)
             # Strong hero value hands tend to unblock folds less; keep conservative.
             f -= 0.02
         per_fold.append(clamp(f, 0.08, 0.78))
-        r = pm.aggression(street) * 0.10 + (0.04 if texture["wetness"] > 0.6 else 0.0)
+        r = ((pm.aggression(street) + dist["raise"]) * 0.5) * 0.16 + (0.04 if texture["wetness"] > 0.6 else 0.0)
         if bet_frac > 1.0:
             r *= 0.55
         per_raise.append(clamp(r, 0.01, 0.22))
