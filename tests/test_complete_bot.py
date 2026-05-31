@@ -111,6 +111,44 @@ def assert_raise(action, amount):
     assert action["amount"] == amount
 
 
+def seed_model(seat, profile):
+    model = bot._model_for(f"villain_{seat}", seat)
+    model.hands = 80
+    if profile == "nit":
+        model.vpip_hands = 10
+        model.pfr_hands = 8
+        model.threebet_opps = 30
+        model.threebets = 1
+    elif profile == "tight_passive":
+        model.vpip_hands = 16
+        model.pfr_hands = 6
+        model.postflop_calls = 16
+        model.postflop_bets_raises = 1
+        model.postflop_actions = 20
+    elif profile == "station":
+        model.vpip_hands = 38
+        model.pfr_hands = 8
+        model.postflop_calls = 24
+        model.postflop_bets_raises = 2
+        model.postflop_actions = 34
+        model.saw_flop_hands = 32
+        model.showdown_hands = 18
+        model.cb_opps = 12
+        model.cb_folds = 1
+        model.faced_threebet = 12
+        model.folded_to_threebet = 1
+    elif profile == "overfolder":
+        model.vpip_hands = 18
+        model.pfr_hands = 14
+        model.steal_opps = 20
+        model.folded_to_steal = 18
+        model.threebet_opps = 30
+        model.threebets = 1
+        model.cb_opps = 12
+        model.cb_folds = 10
+    return model
+
+
 def test_combo_normalizes_rank_order_pairs_and_suitedness():
     assert bot._combo(["Kh", "As"]) == "AKo"
     assert bot._combo(["Td", "9d"]) == "T9s"
@@ -499,6 +537,190 @@ def test_opponent_model_tracks_hands_vpip_pfr_and_threebet_opportunities():
     assert threebettor["threebet_opps"] == 1
     assert threebettor["threebet_pct"] == 1
     assert folder["threebet_opps"] == 0
+
+
+def test_opponent_model_tracks_fold_to_steal_and_fold_to_threebet():
+    steal = make_state(
+        hand_id="model-steal",
+        seat=0,
+        action_log=[
+            {"seat": 5, "action": "raise", "amount": 250},
+            {"seat": 1, "action": "fold", "amount": 0},
+            {"seat": 2, "action": "fold", "amount": 0},
+        ],
+    )
+    bot.decide(steal)
+
+    threebet = make_state(
+        hand_id="model-fold-3bet",
+        seat=0,
+        current_bet=900,
+        amount_owed=900,
+        min_raise_to=1_500,
+        action_log=[
+            {"seat": 3, "action": "raise", "amount": 250},
+            {"seat": 4, "action": "raise", "amount": 900},
+            {"seat": 3, "action": "fold", "amount": 0},
+        ],
+    )
+    bot.decide(threebet)
+
+    profiles = bot._opponent_profiles()
+    assert profiles["villain_1"]["steal_opps"] == 1
+    assert profiles["villain_1"]["fold_to_steal"] == 1
+    assert profiles["villain_2"]["fold_to_steal"] == 1
+    assert profiles["villain_3"]["faced_threebet"] == 1
+    assert profiles["villain_3"]["fold_to_threebet"] == 1
+
+
+def test_opponent_model_does_not_double_count_repeated_state():
+    state = make_state(
+        hand_id="repeat-model",
+        seat=0,
+        action_log=[
+            {"seat": 3, "action": "raise", "amount": 250},
+            {"seat": 4, "action": "fold", "amount": 0},
+        ],
+    )
+    bot.decide(state)
+    bot.decide(state)
+
+    profiles = bot._opponent_profiles()
+    assert profiles["villain_3"]["hands"] == 1
+    assert profiles["villain_3"]["pfr"] == 1
+
+
+def test_observed_history_keeps_preflop_and_flop_actions_separate_without_log_streets():
+    preflop = make_state(
+        hand_id="street-history",
+        seat=0,
+        current_bet=250,
+        amount_owed=250,
+        min_raise_to=350,
+        action_log=[
+            {"seat": 3, "action": "raise", "amount": 250},
+            {"seat": 4, "action": "call", "amount": 250},
+        ],
+    )
+    bot.decide(preflop)
+
+    flop = make_state(
+        hand_id="street-history",
+        seat=0,
+        street="flop",
+        action_log=[
+            {"seat": 3, "action": "raise", "amount": 250},
+            {"seat": 4, "action": "call", "amount": 250},
+            {"seat": 3, "action": "check", "amount": 0},
+        ],
+    )
+    bot.decide(flop)
+
+    assert bot._last_preflop_raiser(flop) == 3
+    assert [entry["action"] for entry in bot._postflop_actions(flop, "flop")] == ["check"]
+
+
+def test_unknown_opponent_keeps_baseline_preflop_fold():
+    assert bot.decide(make_state(seat=0, cards=("Qs", "2s")))["action"] == "fold"
+
+
+def test_overfolding_blinds_unlock_named_button_steal_expansion():
+    seed_model(1, "overfolder")
+    seed_model(2, "overfolder")
+
+    action = bot.decide(make_state(seat=0, cards=("Qs", "2s")))
+
+    assert_raise(action, 250)
+
+
+def test_nit_opener_makes_marginal_broadway_fold():
+    seed_model(3, "nit")
+    state = make_state(
+        seat=4,
+        cards=("Ks", "Qh"),
+        current_bet=250,
+        amount_owed=250,
+        min_raise_to=350,
+        action_log=[{"seat": 3, "action": "raise", "amount": 250}],
+    )
+
+    assert bot.decide(state)["action"] == "fold"
+
+
+def test_calling_station_opener_removes_light_threebet_bluff():
+    seed_model(3, "station")
+    state = make_state(
+        seat=4,
+        cards=("As", "5s"),
+        current_bet=250,
+        amount_owed=250,
+        min_raise_to=350,
+        action_log=[{"seat": 3, "action": "raise", "amount": 250}],
+    )
+
+    assert bot.decide(state)["action"] != "raise"
+
+
+def test_station_flop_checks_air_but_bets_value_larger():
+    seed_model(1, "station")
+    action_log = [
+        {"seat": 0, "action": "raise", "amount": 250, "street": "preflop"},
+        {"seat": 1, "action": "call", "amount": 250, "street": "preflop"},
+    ]
+    air = make_state(street="flop", n_players=2, seat=0, cards=("Ks", "Qh"), action_log=action_log)
+    air["pot"] = 1_000
+    assert bot.decide(air)["action"] == "check"
+
+    value = make_state(street="flop", n_players=2, seat=0, cards=("As", "Kh"), action_log=action_log)
+    value["pot"] = 1_000
+    assert_raise(bot.decide(value), 750)
+
+
+def test_overfolder_faces_selected_flop_cbet_with_equity():
+    seed_model(1, "overfolder")
+    state = make_state(
+        hand_id="overfolder-cbet",
+        street="flop",
+        n_players=2,
+        seat=0,
+        cards=("Ks", "Jh"),
+        action_log=[
+            {"seat": 0, "action": "raise", "amount": 250, "street": "preflop"},
+            {"seat": 1, "action": "call", "amount": 250, "street": "preflop"},
+        ],
+    )
+    state["community_cards"] = ["Qd", "Ts", "2c"]
+    state["pot"] = 1_000
+
+    assert bot.decide(state)["action"] == "raise"
+
+
+def test_passive_big_river_bet_folds_one_pair_without_blocker():
+    seed_model(1, "tight_passive")
+    state = make_state(
+        street="river",
+        n_players=2,
+        seat=0,
+        cards=("As", "Kh"),
+        current_bet=900,
+        amount_owed=900,
+        min_raise_to=1_800,
+        can_check=False,
+        action_log=[
+            {"seat": 0, "action": "raise", "amount": 250, "street": "preflop"},
+            {"seat": 1, "action": "call", "amount": 250, "street": "preflop"},
+            {"seat": 1, "action": "raise", "amount": 900, "street": "river"},
+        ],
+    )
+    state["community_cards"] = ["Ad", "7c", "2h", "Td", "9s"]
+    state["pot"] = 1_000
+
+    assert bot.decide(state)["action"] == "fold"
+
+
+def test_raise_to_emits_all_in_when_stack_capped():
+    state = make_state(street="flop", current_bet=500, min_raise_to=1_000, your_stack=1_000)
+    assert bot._raise_to(state, 1_200) == {"action": "all_in"}
 
 
 def test_opponent_model_tracks_postflop_aggression_and_fold_to_cbet():

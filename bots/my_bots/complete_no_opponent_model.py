@@ -19,191 +19,6 @@ SIZING_RULES = {
 
 PREMIUMS = {"AA", "KK", "QQ", "AKs", "AKo"}
 STRONG_CONTINUES = {"JJ", "TT", "AQs", "AQo", "AJs", "KQs"}
-MIN_TRUSTED_HANDS = 50
-MAX_TRACKED_HANDS = 80
-MIN_STEAL_OPPS = 6
-MIN_THREEBET_OPPS = 8
-MIN_FOLD_TO_THREEBET_OPPS = 6
-MIN_CBET_OPPS = 6
-MIN_POSTFLOP_ACTIONS = 8
-
-OPPONENT_MODELS = {}
-HAND_OBSERVATIONS = {}
-
-
-def _bayes_rate(successes, opportunities, prior_rate, prior_weight):
-    return (successes + prior_rate * prior_weight) / max(1, opportunities + prior_weight)
-
-
-class OppModel:
-    def __init__(self, bot_id=None, seat=None):
-        self.bot_id = bot_id
-        self.last_seen_seat = seat
-        self.hands = 0
-        self.vpip_hands = 0
-        self.pfr_hands = 0
-        self.postflop_bets_raises = 0
-        self.postflop_calls = 0
-        self.postflop_actions = 0
-        self.steal_opps = 0
-        self.folded_to_steal = 0
-        self.threebet_opps = 0
-        self.threebets = 0
-        self.faced_threebet = 0
-        self.folded_to_threebet = 0
-        self.fourbet_opps = 0
-        self.fourbets = 0
-        self.cb_opps = 0
-        self.cb_folds = 0
-        self.saw_flop_hands = 0
-        self.showdown_hands = 0
-
-    def update_from_action_log(self, log, my_seat):
-        """Fallback parser for richer historical logs; live tracking is preferred."""
-        preflop_raises = 0
-        saw_threebet_opp = False
-        saw_vpip = False
-        saw_pfr = False
-        self.hands += 1
-        for entry in log:
-            if entry.get("seat") == my_seat:
-                continue
-            if self.last_seen_seat is not None and entry.get("seat") != self.last_seen_seat:
-                continue
-            action = entry.get("action")
-            street = entry.get("street", "preflop")
-            if action in ("small_blind", "big_blind"):
-                continue
-            if street == "preflop":
-                if preflop_raises == 1 and action in ("fold", "call", "raise", "all_in") and not saw_threebet_opp:
-                    self.threebet_opps += 1
-                    if action in ("raise", "all_in"):
-                        self.threebets += 1
-                    saw_threebet_opp = True
-                if action in ("call", "raise", "all_in"):
-                    saw_vpip = True
-                if action in ("raise", "all_in"):
-                    saw_pfr = True
-                    preflop_raises += 1
-            elif action in ("raise", "all_in"):
-                self.postflop_bets_raises += 1
-                self.postflop_actions += 1
-            elif street != "preflop" and action == "call":
-                self.postflop_calls += 1
-                self.postflop_actions += 1
-        if saw_vpip:
-            self.vpip_hands += 1
-        if saw_pfr:
-            self.pfr_hands += 1
-
-    @property
-    def vpip(self):
-        return self.vpip_hands / max(1, self.hands)
-
-    @property
-    def pfr(self):
-        return self.pfr_hands / max(1, self.hands)
-
-    @property
-    def af(self):
-        return self.postflop_bets_raises / max(1, self.postflop_calls)
-
-    @property
-    def threebet_pct(self):
-        return self.threebets / max(1, self.threebet_opps)
-
-    @property
-    def fold_to_steal(self):
-        return self.folded_to_steal / max(1, self.steal_opps)
-
-    @property
-    def fold_to_threebet(self):
-        return self.folded_to_threebet / max(1, self.faced_threebet)
-
-    @property
-    def fourbet_pct(self):
-        return self.fourbets / max(1, self.fourbet_opps)
-
-    @property
-    def fold_to_cbet(self):
-        return self.cb_folds / max(1, self.cb_opps)
-
-    @property
-    def wtsd(self):
-        return self.showdown_hands / max(1, self.saw_flop_hands)
-
-    @property
-    def postflop_aggression_frequency(self):
-        return self.postflop_bets_raises / max(1, self.postflop_actions)
-
-    @property
-    def bayes_vpip(self):
-        return _bayes_rate(self.vpip_hands, self.hands, 0.24, 30)
-
-    @property
-    def bayes_pfr(self):
-        return _bayes_rate(self.pfr_hands, self.hands, 0.18, 30)
-
-    @property
-    def bayes_threebet(self):
-        return _bayes_rate(self.threebets, self.threebet_opps, 0.07, 20)
-
-    @property
-    def bayes_fold_to_steal(self):
-        return _bayes_rate(self.folded_to_steal, self.steal_opps, 0.55, 20)
-
-    @property
-    def bayes_fold_to_threebet(self):
-        return _bayes_rate(self.folded_to_threebet, self.faced_threebet, 0.50, 20)
-
-    @property
-    def bayes_fourbet(self):
-        return _bayes_rate(self.fourbets, self.fourbet_opps, 0.06, 20)
-
-    @property
-    def bayes_fold_to_cbet(self):
-        return _bayes_rate(self.cb_folds, self.cb_opps, 0.45, 20)
-
-    @property
-    def bayes_wtsd(self):
-        return _bayes_rate(self.showdown_hands, self.saw_flop_hands, 0.27, 30)
-
-    @property
-    def trusted(self):
-        return self.hands >= MIN_TRUSTED_HANDS
-
-    def snapshot(self):
-        return {
-            "bot_id": self.bot_id,
-            "last_seen_seat": self.last_seen_seat,
-            "hands": self.hands,
-            "trusted": self.trusted,
-            "vpip": self.vpip,
-            "pfr": self.pfr,
-            "af": self.af,
-            "postflop_actions": self.postflop_actions,
-            "postflop_aggression_frequency": self.postflop_aggression_frequency,
-            "fold_to_steal": self.fold_to_steal,
-            "steal_opps": self.steal_opps,
-            "threebet_pct": self.threebet_pct,
-            "threebet_opps": self.threebet_opps,
-            "fold_to_threebet": self.fold_to_threebet,
-            "faced_threebet": self.faced_threebet,
-            "fourbet_pct": self.fourbet_pct,
-            "fourbet_opps": self.fourbet_opps,
-            "fold_to_cbet": self.fold_to_cbet,
-            "cbet_opps": self.cb_opps,
-            "wtsd": self.wtsd,
-            "saw_flop_hands": self.saw_flop_hands,
-            "bayes_vpip": self.bayes_vpip,
-            "bayes_pfr": self.bayes_pfr,
-            "bayes_threebet": self.bayes_threebet,
-            "bayes_fold_to_steal": self.bayes_fold_to_steal,
-            "bayes_fold_to_threebet": self.bayes_fold_to_threebet,
-            "bayes_fourbet": self.bayes_fourbet,
-            "bayes_fold_to_cbet": self.bayes_fold_to_cbet,
-            "bayes_wtsd": self.bayes_wtsd,
-        }
 
 
 def _s(*hands):
@@ -644,224 +459,6 @@ def _blind_seats(state):
     return small_blind, big_blind
 
 
-def _seat_to_bot_id(state):
-    return {player.get("seat"): player.get("bot_id") for player in state.get("players", [])}
-
-
-def _hero_bot_id(state):
-    seat = state.get("seat_to_act")
-    for player in state.get("players", []):
-        if player.get("seat") == seat:
-            return player.get("bot_id")
-    return None
-
-
-def _model_for(bot_id, seat=None):
-    if not bot_id:
-        return None
-    model = OPPONENT_MODELS.get(bot_id)
-    if model is None:
-        model = OppModel(bot_id=bot_id, seat=seat)
-        OPPONENT_MODELS[bot_id] = model
-    model.last_seen_seat = seat
-    return model
-
-
-def _new_hand_observation(state):
-    return {
-        "processed_actions": 0,
-        "observed_actions": [],
-        "vpip_counted": set(),
-        "pfr_counted": set(),
-        "threebet_opp_counted": set(),
-        "fold_to_threebet_counted": set(),
-        "steal_opp_counted": set(),
-        "preflop_raise_count": 0,
-        "preflop_first_raiser": None,
-        "preflop_second_raiser": None,
-        "preflop_aggressor": None,
-        "preflop_callers": set(),
-        "steal_raiser": None,
-        "saw_flop_counted": False,
-        "cbet_seen": False,
-        "cbet_pending": set(),
-    }
-
-
-def _prune_hand_observations():
-    if len(HAND_OBSERVATIONS) <= MAX_TRACKED_HANDS:
-        return
-    for hand_id in list(HAND_OBSERVATIONS.keys())[: len(HAND_OBSERVATIONS) - MAX_TRACKED_HANDS]:
-        HAND_OBSERVATIONS.pop(hand_id, None)
-
-
-def _count_dealt_hand(state):
-    hero = _hero_bot_id(state)
-    for player in state.get("players", []):
-        bot_id = player.get("bot_id")
-        if bot_id and bot_id != hero:
-            model = _model_for(bot_id, player.get("seat"))
-            model.hands += 1
-
-
-def _count_saw_flop(state, obs):
-    if obs["saw_flop_counted"] or state.get("street") == "preflop":
-        return
-    hero = _hero_bot_id(state)
-    for player in state.get("players", []):
-        if player.get("is_folded"):
-            continue
-        bot_id = player.get("bot_id")
-        if bot_id and bot_id != hero:
-            _model_for(bot_id, player.get("seat")).saw_flop_hands += 1
-    obs["saw_flop_counted"] = True
-
-
-def _observe_preflop_action(obs, entry, model, seat, positions):
-    action = entry.get("action")
-    prior_raises = obs["preflop_raise_count"]
-    position = positions.get(seat)
-
-    if model and prior_raises == 1 and action in ("fold", "call", "raise", "all_in") and seat not in obs["threebet_opp_counted"]:
-        model.threebet_opps += 1
-        if action in ("raise", "all_in"):
-            model.threebets += 1
-        obs["threebet_opp_counted"].add(seat)
-
-    if (
-        model
-        and prior_raises == 1
-        and obs.get("steal_raiser") is not None
-        and position in {"SB", "BB"}
-        and action in ("fold", "call", "raise", "all_in")
-        and seat not in obs["steal_opp_counted"]
-    ):
-        model.steal_opps += 1
-        if action == "fold":
-            model.folded_to_steal += 1
-        obs["steal_opp_counted"].add(seat)
-
-    if (
-        model
-        and prior_raises == 2
-        and seat == obs.get("preflop_first_raiser")
-        and action in ("fold", "call", "raise", "all_in")
-        and seat not in obs["fold_to_threebet_counted"]
-    ):
-        model.faced_threebet += 1
-        model.fourbet_opps += 1
-        if action == "fold":
-            model.folded_to_threebet += 1
-        if action in ("raise", "all_in"):
-            model.fourbets += 1
-        obs["fold_to_threebet_counted"].add(seat)
-
-    if action in ("call", "raise", "all_in"):
-        if model and seat not in obs["vpip_counted"]:
-            model.vpip_hands += 1
-            obs["vpip_counted"].add(seat)
-        if prior_raises > 0 and action == "call":
-            obs["preflop_callers"].add(seat)
-
-    if action in ("raise", "all_in"):
-        if model and seat not in obs["pfr_counted"]:
-            model.pfr_hands += 1
-            obs["pfr_counted"].add(seat)
-        if prior_raises == 0:
-            obs["preflop_first_raiser"] = seat
-            if position in {"CO", "BTN", "SB"}:
-                obs["steal_raiser"] = seat
-        elif prior_raises == 1:
-            obs["preflop_second_raiser"] = seat
-        obs["preflop_raise_count"] += 1
-        obs["preflop_aggressor"] = seat
-        obs["preflop_callers"].clear()
-
-
-def _observe_postflop_action(obs, entry, model, seat, street, seat_to_bot):
-    action = entry.get("action")
-    if action in ("raise", "all_in"):
-        if model:
-            model.postflop_bets_raises += 1
-            model.postflop_actions += 1
-        if street == "flop" and not obs["cbet_seen"] and seat == obs["preflop_aggressor"]:
-            obs["cbet_seen"] = True
-            for target in set(obs["preflop_callers"]):
-                if target == seat:
-                    continue
-                target_model = _model_for(seat_to_bot.get(target), target)
-                if target_model:
-                    target_model.cb_opps += 1
-                    obs["cbet_pending"].add(target)
-    elif action == "call":
-        if model:
-            model.postflop_calls += 1
-            model.postflop_actions += 1
-        obs["cbet_pending"].discard(seat)
-    elif action == "fold" and seat in obs["cbet_pending"]:
-        if model:
-            model.postflop_actions += 1
-            model.cb_folds += 1
-        obs["cbet_pending"].discard(seat)
-    elif action in {"check", "fold"} and model:
-        model.postflop_actions += 1
-    elif action == "showdown" and model:
-        model.showdown_hands += 1
-
-
-def _update_opponent_models(state):
-    if state.get("type") == "warmup":
-        return
-    hand_id = state.get("hand_id")
-    if not hand_id:
-        return
-
-    obs = HAND_OBSERVATIONS.get(hand_id)
-    if obs is None:
-        obs = _new_hand_observation(state)
-        HAND_OBSERVATIONS[hand_id] = obs
-        _count_dealt_hand(state)
-        _prune_hand_observations()
-
-    _count_saw_flop(state, obs)
-
-    hero_seat = state.get("seat_to_act")
-    seat_to_bot = _seat_to_bot_id(state)
-    positions = _seat_positions(state)
-    street = state.get("street", "preflop")
-    actions = state.get("action_log", [])
-    start = min(obs["processed_actions"], len(actions))
-
-    for entry in actions[start:]:
-        action = entry.get("action")
-        entry_street = entry.get("street", street)
-        annotated = dict(entry)
-        annotated["street"] = entry_street
-        obs["observed_actions"].append(annotated)
-        if action in ("small_blind", "big_blind"):
-            obs["processed_actions"] += 1
-            continue
-        seat = entry.get("seat")
-        bot_id = seat_to_bot.get(seat)
-        model = None if seat == hero_seat else _model_for(bot_id, seat)
-        if entry_street == "preflop":
-            _observe_preflop_action(obs, annotated, model, seat, positions)
-        else:
-            _observe_postflop_action(obs, annotated, model, seat, entry_street, seat_to_bot)
-        obs["processed_actions"] += 1
-
-
-def _opponent_profiles(state=None):
-    if state is not None:
-        _update_opponent_models(state)
-    return {bot_id: model.snapshot() for bot_id, model in OPPONENT_MODELS.items()}
-
-
-def _reset_opponent_models():
-    OPPONENT_MODELS.clear()
-    HAND_OBSERVATIONS.clear()
-
-
 def _live_seats(state):
     seats = []
     for player in state.get("players", []):
@@ -911,8 +508,6 @@ def _raise_to(state, target):
     amount = min(amount, max_total)
     if amount <= int(state.get("current_bet", 0)):
         return {"action": "check"} if state.get("can_check") else {"action": "call"}
-    if amount >= max_total:
-        return {"action": "all_in"}
     return {"action": "raise", "amount": amount}
 
 
@@ -1195,39 +790,24 @@ def _postflop_in_position(state):
 def _preflop_raise_count(state):
     return sum(
         1
-        for entry in _observed_actions(state, "preflop")
+        for entry in state.get("action_log", [])
         if entry.get("action") in {"raise", "all_in"} and entry.get("street", "preflop") == "preflop"
     )
 
 
 def _last_preflop_raiser(state):
     raiser = None
-    for entry in _observed_actions(state, "preflop"):
+    for entry in state.get("action_log", []):
         if entry.get("action") in {"raise", "all_in"} and entry.get("street", "preflop") == "preflop":
             raiser = entry.get("seat")
     return raiser
-
-
-def _observed_actions(state, street=None):
-    obs = HAND_OBSERVATIONS.get(state.get("hand_id"))
-    if obs and obs.get("observed_actions"):
-        actions = obs["observed_actions"]
-    else:
-        actions = state.get("action_log", [])
-    if street is None:
-        return list(actions)
-    return [
-        entry
-        for entry in actions
-        if entry.get("street", "preflop" if street == "preflop" else None) == street
-    ]
 
 
 def _postflop_actions(state, street=None):
     target_street = street or state.get("street")
     return [
         entry
-        for entry in _observed_actions(state, target_street)
+        for entry in state.get("action_log", [])
         if entry.get("street") == target_street and entry.get("action") not in {"small_blind", "big_blind"}
     ]
 
@@ -1240,73 +820,6 @@ def _hero_bet_on_street(state, street):
 def _street_checked_through(state, street):
     actions = _postflop_actions(state, street)
     return bool(actions) and all(entry.get("action") == "check" for entry in actions)
-
-
-def _primary_opponent_model(state):
-    opponents = _opponents_in_hand(state)
-    if not opponents:
-        return None
-    seat_to_bot = _seat_to_bot_id(state)
-    bot_id = seat_to_bot.get(opponents[0].get("seat")) or opponents[0].get("bot_id")
-    return OPPONENT_MODELS.get(bot_id)
-
-
-def _model_for_seat(state, seat):
-    bot_id = _seat_to_bot_id(state).get(seat)
-    return OPPONENT_MODELS.get(bot_id)
-
-
-def _label_for_model(model):
-    if not model:
-        return "unknown"
-    if (
-        model.trusted
-        and model.bayes_vpip <= 0.18
-        and model.bayes_pfr <= 0.13
-        and model.bayes_threebet <= 0.06
-    ):
-        return "nit"
-    if (
-        model.trusted
-        and model.bayes_vpip <= 0.25
-        and model.bayes_pfr <= 0.12
-        and model.af <= 1.2
-    ):
-        return "tight_passive"
-    if (
-        model.trusted
-        and model.bayes_vpip >= 0.34
-        and model.bayes_pfr <= 0.16
-        and model.af <= 1.35
-    ) or (
-        model.cb_opps >= MIN_CBET_OPPS
-        and model.bayes_fold_to_cbet <= 0.38
-        and model.bayes_wtsd >= 0.32
-    ):
-        return "calling_station"
-    if (
-        model.cb_opps >= MIN_CBET_OPPS
-        and model.bayes_fold_to_cbet >= 0.55
-    ) or (
-        model.steal_opps >= MIN_STEAL_OPPS
-        and model.bayes_fold_to_steal >= 0.68
-        and model.bayes_threebet <= 0.08
-    ):
-        return "overfolder"
-    if (
-        model.postflop_actions >= MIN_POSTFLOP_ACTIONS
-        and model.postflop_aggression_frequency >= 0.48
-        and model.af >= 2.0
-    ) or (
-        model.threebet_opps >= MIN_THREEBET_OPPS
-        and model.bayes_threebet >= 0.13
-    ):
-        return "aggressive"
-    return "unknown"
-
-
-def _opponent_label(state):
-    return _label_for_model(_primary_opponent_model(state))
 
 
 def _pot_type(state):
@@ -1333,13 +846,6 @@ def _postflop_size(state, board, info, role):
     street = state.get("street")
     pot_type = _pot_type(state)
     spr = _effective_stack_bb(state) * max(1, _blind_amounts(state)[1]) / max(1, state.get("pot", 1))
-    opponent = _opponent_label(state)
-    heads_up = len(_opponents_in_hand(state)) <= 1
-
-    if heads_up and opponent == "calling_station" and info["strength"] in {"monster", "tptk_plus", "top_pair", "medium_pair"}:
-        if street == "river":
-            return 0.60 if info["strength"] in {"top_pair", "medium_pair"} else 0.75
-        return 0.75
 
     if street == "flop":
         if role == "BB_CALLER_OOP" and board["low_connected"] and not board["monotone"]:
@@ -1388,17 +894,12 @@ def _facing_postflop_bet(state, info, board):
     pot = max(1, int(state.get("pot", 1)))
     price = owed / max(1, pot + owed)
     street = state.get("street")
-    opponent = _opponent_label(state)
     big_bet = owed > pot * 0.65
-    passive_big_bet = opponent in {"nit", "tight_passive"} and street in {"turn", "river"} and big_bet
 
     if info["strength"] == "monster":
         if street != "river" and not board["monotone"]:
             return _bet_fraction(state, 0.75)
         return {"action": "call"}
-
-    if passive_big_bet and info["strength"] in {"tptk_plus", "top_pair", "medium_pair"} and not info["nut_flush_blocker"]:
-        return {"action": "fold"}
 
     if info["strength"] == "tptk_plus":
         if street == "river" and (board["monotone"] or board["straight_potential"] >= 4) and big_bet:
@@ -1408,12 +909,10 @@ def _facing_postflop_bet(state, info, board):
     if street == "river":
         if info["strength"] == "top_pair" and not big_bet:
             return {"action": "call"}
-        if info["strength"] in {"top_pair", "medium_pair"} and info["blocks_value"] and opponent == "aggressive":
-            return {"action": "call"}
         return {"action": "fold"}
 
     if info["strength"] == "top_pair":
-        if board["is_dynamic"] and big_bet and opponent != "calling_station":
+        if board["is_dynamic"] and big_bet:
             return {"action": "fold"}
         return {"action": "call"}
 
@@ -1435,7 +934,6 @@ def _flop_decision(state, info, board, role):
 
     pot_type = _pot_type(state)
     heads_up = len(_opponents_in_hand(state)) <= 1
-    opponent = _opponent_label(state)
     high_freq_board = (
         board["family"] in {"Axx", "Hxx"}
         and not board["low_connected"]
@@ -1450,15 +948,7 @@ def _flop_decision(state, info, board, role):
         return {"action": "check"}
 
     if role in {"IP_PFA", "OOP_PFA"}:
-        if heads_up and opponent == "calling_station":
-            if info["strength"] in {"monster", "tptk_plus", "top_pair", "medium_pair", "strong_draw"}:
-                return _bet_fraction(state, _postflop_size(state, board, info, role))
-            return {"action": "check"}
-
         if high_freq_board and heads_up:
-            if info["strength"] in {"air", "weak_equity"} and opponent == "overfolder":
-                if not _good_flop_bluff(info, board, role):
-                    return {"action": "check"}
             if info["strength"] == "medium_pair" and role == "IP_PFA" and board["is_dynamic"]:
                 return {"action": "check"}
             return _bet_fraction(state, _postflop_size(state, board, info, role))
@@ -1467,15 +957,11 @@ def _flop_decision(state, info, board, role):
             return _bet_fraction(state, _postflop_size(state, board, info, role))
         if info["strength"] == "top_pair":
             return {"action": "check"} if role == "IP_PFA" and board["is_dynamic"] else _bet_fraction(state, 0.50)
-        if heads_up and opponent == "overfolder" and info["strength"] in {"weak_equity", "air"} and _good_flop_bluff(info, board, role):
-            return _bet_fraction(state, 0.33)
         if info["strength"] == "strong_draw" or _good_flop_bluff(info, board, role):
             return _bet_fraction(state, _postflop_size(state, board, info, role))
         return {"action": "check"}
 
     if role == "IP_CALLER":
-        if heads_up and opponent == "calling_station" and info["strength"] in {"air", "weak_equity"}:
-            return {"action": "check"}
         if info["strength"] in {"monster", "tptk_plus", "strong_draw"}:
             return _bet_fraction(state, _postflop_size(state, board, info, role))
         if info["strength"] == "air" and (board["is_static"] or info["nut_flush_blocker"]):
@@ -1494,14 +980,9 @@ def _turn_decision(state, info, board, role):
     flop_checked = _street_checked_through(state, "flop")
     flop_bet = _hero_bet_on_street(state, "flop")
     oop = role in {"OOP_PFA", "OOP_CALLER", "BB_CALLER_OOP"}
-    opponent = _opponent_label(state)
-    heads_up = len(_opponents_in_hand(state)) <= 1
 
     if info["strength"] in {"monster", "tptk_plus"}:
         return _bet_fraction(state, _postflop_size(state, board, info, role))
-
-    if heads_up and opponent == "calling_station" and info["strength"] in {"air", "weak_equity"}:
-        return {"action": "check"}
 
     if flop_checked and oop and _turn_favors_probe(board):
         if info["strength"] in {"top_pair", "strong_draw"} or _good_flop_bluff(info, board, role):
@@ -1525,14 +1006,11 @@ def _river_decision(state, info, board, role):
     if not state.get("can_check"):
         return _facing_postflop_bet(state, info, board)
 
-    opponent = _opponent_label(state)
     if info["strength"] == "monster":
         return _bet_fraction(state, _postflop_size(state, board, info, role))
     if info["strength"] == "tptk_plus" and not (board["monotone"] and not info["nut_flush_blocker"]):
         return _bet_fraction(state, 0.50 if board["is_dynamic"] else 0.67)
-    if info["strength"] == "top_pair" and opponent == "calling_station" and board["is_static"]:
-        return _bet_fraction(state, _postflop_size(state, board, info, role))
-    if opponent != "calling_station" and info["strength"] in {"air", "weak_equity"} and info["nut_flush_blocker"] and role in {"IP_PFA", "IP_CALLER"}:
+    if info["strength"] in {"air", "weak_equity"} and info["nut_flush_blocker"] and role in {"IP_PFA", "IP_CALLER"}:
         return _bet_fraction(state, _postflop_size(state, board, info, role))
     return {"action": "check"}
 
@@ -1646,7 +1124,6 @@ def _parse_preflop_situation(state):
             return {
                 "type": "hero_opened_faces_3bet",
                 "hero_pos": hero_pos,
-                "threebettor_seat": raises[-1]["seat"],
                 "threebettor_pos": raises[-1]["pos"],
                 "open_amount": raises[0]["amount"],
                 "threebet_amount": raises[-1]["amount"],
@@ -1654,7 +1131,6 @@ def _parse_preflop_situation(state):
         return {
             "type": "hero_opened_faces_squeeze",
             "hero_pos": hero_pos,
-            "threebettor_seat": raises[-1]["seat"],
             "threebettor_pos": raises[-1]["pos"],
             "open_amount": raises[0]["amount"],
             "threebet_amount": raises[-1]["amount"],
@@ -1665,9 +1141,7 @@ def _parse_preflop_situation(state):
         return {
             "type": "raise_and_3bet_before_hero",
             "hero_pos": hero_pos,
-            "opener_seat": raises[0]["seat"],
             "opener_pos": raises[0]["pos"],
-            "threebettor_seat": raises[1]["seat"],
             "threebettor_pos": raises[1]["pos"],
             "open_amount": raises[0]["amount"],
             "threebet_amount": raises[1]["amount"],
@@ -1680,13 +1154,12 @@ def _parse_preflop_situation(state):
         return {"type": "bb_vs_sb_limp", "hero_pos": hero_pos}
 
     if hero_pos == "BB" and len(raises) == 1 and raises[0]["pos"] == "SB" and not calls_after_raise:
-        return {"type": "bb_vs_sb_raise", "hero_pos": hero_pos, "opener_seat": raises[0]["seat"], "opener_pos": "SB", "open_amount": raises[0]["amount"]}
+        return {"type": "bb_vs_sb_raise", "hero_pos": hero_pos, "opener_pos": "SB", "open_amount": raises[0]["amount"]}
 
     if len(raises) == 1 and not calls_after_raise and not limps:
         return {
             "type": "vs_open",
             "hero_pos": hero_pos,
-            "opener_seat": raises[0]["seat"],
             "opener_pos": raises[0]["pos"],
             "open_amount": raises[0]["amount"],
         }
@@ -1697,7 +1170,6 @@ def _parse_preflop_situation(state):
         return {
             "type": "open_plus_callers_before_hero",
             "hero_pos": hero_pos,
-            "opener_seat": raises[0]["seat"],
             "opener_pos": raises[0]["pos"],
             "open_amount": raises[0]["amount"],
             "caller_count": len(calls_after_raise),
@@ -1875,102 +1347,7 @@ def _missing_source_fallback(hand, situation, state):
     return {"action": "fold"}
 
 
-STEAL_EXPANSION = {
-    "CO": {"K5s", "K4s", "Q8s", "Q7s", "J8s", "T8s", "97s", "86s", "A8o", "KTo"},
-    "BTN": {"Q2s", "J3s", "T5s", "95s", "84s", "K7o", "Q8o", "J8o", "T8o", "97o"},
-    "SB": {"A2o", "K4o", "Q8o", "J8o", "T8o", "97o", "74s", "63s"},
-}
-LIGHT_THREEBET_BLUFFS = {
-    "A2s", "A3s", "A4s", "A5s", "A6s", "A7s", "A8s", "A9s",
-    "K5s", "K6s", "K7s", "K8s", "K9s", "Q9s", "J9s", "T9s", "65s", "54s",
-}
-LINEAR_THREEBET_VALUE = {
-    "99", "TT", "JJ", "QQ", "KK", "AA", "AQs", "AKs", "AJs", "KQs", "AQo", "AKo",
-}
-TIGHT_OPEN_FOLDS = {
-    "AJo", "ATo", "A9o", "KQo", "KJo", "QJo", "KTo", "QTo", "JTo",
-    "A2s", "A3s", "A4s", "A5s", "K9s", "Q9s", "J9s", "T9s",
-}
-NIT_3BET_FOLDS = {
-    "AJo", "ATo", "KQo", "KJo", "QJo", "A5s", "A4s", "A3s", "A2s",
-    "K9s", "K8s", "QTs", "JTs", "T9s", "98s", "77", "66", "55", "44", "33", "22",
-}
-
-
-def _active_blind_models(state):
-    small_blind, big_blind = _blind_seats(state)
-    seats = [seat for seat in (small_blind, big_blind) if seat is not None and seat != state.get("seat_to_act")]
-    return [
-        model
-        for seat in seats
-        for model in [_model_for_seat(state, seat)]
-        if model is not None
-    ]
-
-
-def _all_blinds_overfold_to_steals(state):
-    models = _active_blind_models(state)
-    if not models:
-        return False
-    return all(
-        model.steal_opps >= MIN_STEAL_OPPS
-        and model.bayes_fold_to_steal >= 0.68
-        and model.bayes_threebet <= 0.08
-        for model in models
-    )
-
-
-def _baseline_call_available(hand, situation):
-    spot_type = situation.get("type")
-    hero_pos = situation.get("hero_pos")
-    if spot_type != "vs_open":
-        return False
-    key = (f"{situation.get('opener_pos')}_open", f"{hero_pos}_hero")
-    range_group = "vs_open_ip" if hero_pos in {"HJ", "CO", "BTN"} else "vs_open_oop"
-    table = PREFLOP_RANGES[range_group].get(key, {})
-    return hand in table.get("call", set())
-
-
 def _apply_exploit_adjustments(action, hand, situation, state):
-    spot_type = situation.get("type")
-    hero_pos = situation.get("hero_pos")
-
-    if (
-        spot_type == "unopened"
-        and hero_pos in STEAL_EXPANSION
-        and action in {"fold", "call"}
-        and hand in STEAL_EXPANSION[hero_pos]
-        and _all_blinds_overfold_to_steals(state)
-    ):
-        return "raise"
-
-    if spot_type in {"vs_open", "bb_vs_sb_raise"}:
-        opener = _model_for_seat(state, situation.get("opener_seat"))
-        opener_label = _label_for_model(opener)
-        if opener_label in {"nit", "tight_passive"} and action in {"call", "3bet"} and hand in TIGHT_OPEN_FOLDS:
-            return "fold"
-        if (
-            action == "3bet"
-            and hand in LIGHT_THREEBET_BLUFFS
-            and opener
-            and (
-                opener_label == "calling_station"
-                or (
-                    opener.faced_threebet >= MIN_FOLD_TO_THREEBET_OPPS
-                    and opener.bayes_fold_to_threebet <= 0.45
-                )
-            )
-        ):
-            return "call" if _baseline_call_available(hand, situation) else "fold"
-
-    if spot_type in {"hero_opened_faces_3bet", "hero_opened_faces_squeeze"}:
-        threebettor = _model_for_seat(state, situation.get("threebettor_seat"))
-        threebettor_label = _label_for_model(threebettor)
-        if threebettor_label in {"nit", "tight_passive"} and action in {"call", "4bet"} and hand in NIT_3BET_FOLDS:
-            return "fold"
-        if threebettor_label in {"nit", "tight_passive"} and action == "4bet" and hand not in PREMIUMS:
-            return "fold"
-
     return action
 
 
@@ -2000,7 +1377,6 @@ def decide(state):
     if state.get("type") == "warmup":
         return {"action": "check"}
     try:
-        _update_opponent_models(state)
         if state.get("street") == "preflop":
             return _preflop_decision(state)
 
