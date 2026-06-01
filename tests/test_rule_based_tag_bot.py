@@ -5,7 +5,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from bots.rule_based_TAG import blackrain79 as tag_bot
+from bots.my_bots import blackrain79 as tag_bot
 
 
 VALID_ACTIONS = {"fold", "check", "call", "raise", "all_in"}

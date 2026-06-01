@@ -1,6 +1,10 @@
 """V1 with the following fixes and enhancements: {}"""
 
+import bisect
+import random
 from math import erf, sqrt
+
+import eval7
 
 try:
     from scipy.stats import beta as _beta_dist
@@ -13,6 +17,11 @@ BOT_AVATAR = "robot_1"
 RANKS = "23456789TJQKA"
 RANK_VALUE = {rank: i + 2 for i, rank in enumerate(RANKS)}
 HIGH_CARDS = {"A", "K", "Q", "J", "T"}
+SUITS = "cdhs"
+FULL_DECK = [rank + suit for rank in RANKS for suit in SUITS]
+EVAL7_CARD_CACHE = {}
+EQUITY_RANGE_CACHE = {}
+MAX_EQUITY_RANGE_CACHE = 128
 
 SIZING_RULES = {
     "rfi": 2.5,
@@ -925,6 +934,34 @@ def _combo(cards):
     if ranks[0] == ranks[1]:
         return ranks[0] + ranks[1]
     return ranks[0] + ranks[1] + ("s" if cards[0][1] == cards[1][1] else "o")
+
+
+def _combo_score(hand):
+    ranks = [RANK_VALUE[hand[0]], RANK_VALUE[hand[1]]]
+    high, low = max(ranks), min(ranks)
+    pair = len(hand) == 2
+    suited = len(hand) == 3 and hand[2] == "s"
+    connected = abs(high - low) <= 2 or {high, low} == {14, 5}
+    broadway = high >= RANK_VALUE["T"] and low >= RANK_VALUE["T"]
+    if pair:
+        return _clamp(0.46 + high / 18.0, 0.0, 1.0)
+    score = (high + low) / 28.0
+    if suited:
+        score += 0.055
+    if connected:
+        score += 0.035
+    if broadway:
+        score += 0.045
+    if high == 14 and low <= 5 and suited:
+        score += 0.025
+    return _clamp(score, 0.0, 1.0)
+
+
+ALL_HOLE_COMBOS = [
+    (c1, c2, _combo((c1, c2)), _combo_score(_combo((c1, c2))))
+    for idx, c1 in enumerate(FULL_DECK)
+    for c2 in FULL_DECK[idx + 1 :]
+]
 
 
 def _blind_amounts(state):
@@ -1893,49 +1930,422 @@ def _scare_turn_for_pfa(board):
     return board["top_rank"] >= RANK_VALUE["K"] or board["monotone"] or board["paired"]
 
 
+def _eval7_cards(cards):
+    out = []
+    for card in cards:
+        cached = EVAL7_CARD_CACHE.get(card)
+        if cached is None:
+            cached = eval7.Card(card)
+            EVAL7_CARD_CACHE[card] = cached
+        out.append(cached)
+    return out
+
+
+def _eval7_rank(cards):
+    return eval7.evaluate(_eval7_cards(cards))
+
+
+def _stable_seed_for_state(state, board_cards):
+    parts = [
+        state.get("hand_id", ""),
+        state.get("street", ""),
+        ",".join(state.get("your_cards", [])),
+        ",".join(board_cards),
+        str(state.get("pot", 0)),
+        str(state.get("amount_owed", 0)),
+        str(len(_observed_actions(state))),
+    ]
+    text = "|".join(parts)
+    return sum((idx + 1) * ord(char) for idx, char in enumerate(text))
+
+
+def _candidate_info(hole, board_cards):
+    all_cards = list(hole) + list(board_cards)
+    ranks = [card[0] for card in all_cards]
+    board_ranks = [card[0] for card in board_cards]
+    hole_ranks = [card[0] for card in hole]
+    hole_values = sorted((RANK_VALUE[rank] for rank in hole_ranks), reverse=True)
+    board_top = max((RANK_VALUE[rank] for rank in board_ranks), default=0)
+    rank_counts = {rank: ranks.count(rank) for rank in set(ranks)}
+    hand_type = _hand_type(all_cards) if board_cards else "high card"
+    made = {
+        "high card": 0,
+        "pair": 1,
+        "two pair": 2,
+        "three of a kind": 3,
+        "straight": 4,
+        "flush": 5,
+        "full house": 6,
+        "four of a kind": 7,
+        "straight flush": 8,
+    }.get(hand_type, 0)
+    pocket_pair = hole_ranks[0] == hole_ranks[1]
+    pair_uses_hole = any(rank_counts.get(rank, 0) >= 2 for rank in hole_ranks)
+    top_pair = any(RANK_VALUE[rank] == board_top and rank_counts.get(rank, 0) >= 2 for rank in hole_ranks)
+    second_pair = any(0 < RANK_VALUE[rank] < board_top and rank_counts.get(rank, 0) >= 2 for rank in hole_ranks)
+    overpair = pocket_pair and board_top and RANK_VALUE[hole_ranks[0]] > board_top
+    suit_counts = {}
+    board_suit_counts = {}
+    for card in all_cards:
+        suit_counts[card[1]] = suit_counts.get(card[1], 0) + 1
+    for card in board_cards:
+        board_suit_counts[card[1]] = board_suit_counts.get(card[1], 0) + 1
+    flush_draw = made < 5 and len(board_cards) < 5 and max(suit_counts.values() or [0]) >= 4
+    oesd = len(board_cards) < 5 and not _has_straight(ranks) and _has_open_ended_draw(ranks)
+    gutshot = len(board_cards) < 5 and not oesd and not _has_straight(ranks) and _has_gutshot(ranks)
+    overcards = bool(board_cards) and made == 0 and sum(1 for value in hole_values if value > board_top) >= 1
+    board_flush_suit = max(board_suit_counts, key=board_suit_counts.get) if board_suit_counts else None
+    nut_flush_blocker = bool(
+        board_flush_suit
+        and board_suit_counts[board_flush_suit] >= 3
+        and f"A{board_flush_suit}" in hole
+    )
+    draw_power = 0.0
+    if flush_draw:
+        draw_power += 0.55
+    if oesd:
+        draw_power += 0.40
+    if gutshot:
+        draw_power += 0.20
+    if overcards:
+        draw_power += 0.12
+    if nut_flush_blocker:
+        draw_power += 0.12
+    if pair_uses_hole:
+        draw_power += 0.08
+    return {
+        "made": made,
+        "type": hand_type,
+        "top_pair": top_pair,
+        "second_pair": second_pair,
+        "overpair": overpair,
+        "pair_uses_hole": pair_uses_hole,
+        "flush_draw": flush_draw,
+        "oesd": oesd,
+        "gutshot": gutshot,
+        "overcards": overcards,
+        "nut_flush_blocker": nut_flush_blocker,
+        "draw_power": draw_power,
+    }
+
+
+def _model_looseness_factor(model):
+    if not model:
+        return 1.0
+    return _clamp(0.75 + model.bayes_vpip, 0.75, 1.30)
+
+
+def _model_aggression_factor(model):
+    if not model:
+        return 1.0
+    return _clamp(0.75 + model.postflop_aggression_frequency, 0.75, 1.40)
+
+
+def _preflop_range_weight(hand, score, action, raise_depth, model):
+    action = "raise" if action == "bet" else action
+    suited = len(hand) == 3 and hand[2] == "s"
+    pair = len(hand) == 2
+    connector = len(hand) == 3 and abs(RANK_VALUE[hand[0]] - RANK_VALUE[hand[1]]) <= 2
+    wheel_ace = hand in {"A5s", "A4s", "A3s", "A2s"}
+    loose = _model_looseness_factor(model)
+    aggro = _model_aggression_factor(model)
+
+    if action in {"raise", "all_in"}:
+        threshold = 0.52 + 0.085 * max(0, raise_depth - 1)
+        value = 0.04 + 4.1 * max(0.0, score - threshold) ** 1.25
+        bluff = 0.18 if (suited and (connector or wheel_ace)) else 0.025
+        if action == "all_in":
+            value *= 1.45
+            bluff *= 0.25
+        return _clamp(value * aggro + bluff, 0.01, 5.0)
+    if action == "call":
+        implied = 0.0
+        if pair:
+            implied += 0.45
+        if suited:
+            implied += 0.28
+        if connector:
+            implied += 0.18
+        return _clamp((0.08 + score * 0.45 + implied) * loose, 0.01, 3.2)
+    if action == "check":
+        return _clamp(0.75 + loose * 0.20, 0.20, 1.35)
+    if action == "fold":
+        return 0.0
+    return 1.0
+
+
+def _postflop_range_weight(hole, board_cards, action, model):
+    action = "raise" if action in {"bet", "all_in"} else action
+    info = _candidate_info(hole, board_cards)
+    made = info["made"]
+    draw = info["draw_power"]
+    aggro = _model_aggression_factor(model)
+    loose = _model_looseness_factor(model)
+
+    if action == "raise":
+        value_by_made = [0.06, 0.18, 0.45, 0.75, 1.25, 1.80, 2.30, 2.80, 3.20]
+        value = value_by_made[made]
+        if info["top_pair"]:
+            value += 0.42
+        if info["overpair"]:
+            value += 0.65
+        air = 0.08 * aggro if made <= 1 and draw < 0.25 else 0.0
+        return _clamp(value * aggro + draw * (0.85 + aggro * 0.55) + air, 0.01, 5.0)
+    if action == "call":
+        call_by_made = [0.04, 0.62, 1.00, 1.10, 1.35, 1.55, 1.35, 1.20, 1.20]
+        value = call_by_made[made]
+        if info["top_pair"] or info["overpair"]:
+            value += 0.28
+        return _clamp((value + draw * 0.85) * loose, 0.01, 3.6)
+    if action == "check":
+        check_by_made = [0.95, 1.15, 1.05, 0.95, 0.82, 0.72, 0.66, 0.60, 0.60]
+        value = check_by_made[made] + draw * 0.20
+        if made >= 4:
+            value *= 1.0 - (aggro - 0.75) * 0.22
+        return _clamp(value, 0.02, 2.0)
+    if action == "fold":
+        return 0.0
+    return 1.0
+
+
+def _make_weighted_range(items):
+    clean = []
+    cumulative = []
+    total = 0.0
+    for c1, c2, weight in items:
+        if weight <= 0:
+            continue
+        total += weight
+        clean.append((c1, c2, weight))
+        cumulative.append(total)
+    return {"items": clean, "cum": cumulative, "total": total}
+
+
+def _cache_equity_range(key, value):
+    if len(EQUITY_RANGE_CACHE) >= MAX_EQUITY_RANGE_CACHE:
+        EQUITY_RANGE_CACHE.pop(next(iter(EQUITY_RANGE_CACHE)), None)
+    EQUITY_RANGE_CACHE[key] = value
+    return value
+
+
+def _build_heads_up_villain_range(state, board_cards):
+    opponents = _opponents_in_hand(state)
+    if len(opponents) != 1:
+        return None
+    villain = opponents[0]
+    villain_seat = villain.get("seat")
+    known = set(state.get("your_cards", [])) | set(board_cards)
+    if len(state.get("your_cards", [])) < 2 or len(board_cards) < 3:
+        return None
+
+    actions = _observed_actions(state)
+    cache_key = (
+        state.get("hand_id"),
+        state.get("street"),
+        villain_seat,
+        tuple(state.get("your_cards", [])),
+        tuple(board_cards),
+        len(actions),
+    )
+    cached = EQUITY_RANGE_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    model = _model_for_seat(state, villain_seat)
+    preflop_actions = [
+        entry
+        for entry in _observed_actions(state, "preflop")
+        if entry.get("seat") == villain_seat and entry.get("action") not in {"small_blind", "big_blind"}
+    ]
+    postflop_actions = [
+        entry
+        for entry in actions
+        if entry.get("seat") == villain_seat
+        and entry.get("street") in {"flop", "turn", "river"}
+        and entry.get("action") not in {"small_blind", "big_blind"}
+    ]
+
+    items = []
+    raise_depth = 0
+    for c1, c2, hand, score in ALL_HOLE_COMBOS:
+        if c1 in known or c2 in known:
+            continue
+        weight = 1.0
+        raise_depth = 0
+        for action_entry in preflop_actions:
+            action = action_entry.get("action")
+            if action in {"raise", "all_in"}:
+                raise_depth += 1
+            weight *= _preflop_range_weight(hand, score, action, raise_depth, model)
+            if weight <= 0:
+                break
+        if weight <= 0:
+            continue
+        for action_entry in postflop_actions:
+            weight *= _postflop_range_weight((c1, c2), board_cards, action_entry.get("action"), model)
+            if weight <= 0:
+                break
+        if weight > 0.0001:
+            items.append((c1, c2, weight))
+
+    if not items:
+        items = [(c1, c2, 1.0) for c1, c2, _, _ in ALL_HOLE_COMBOS if c1 not in known and c2 not in known]
+    return _cache_equity_range(cache_key, _make_weighted_range(items))
+
+
+def _weighted_combo_choice(villain_range, dead, rng):
+    items = villain_range.get("items", [])
+    cumulative = villain_range.get("cum", [])
+    total = villain_range.get("total", 0.0)
+    if not items or total <= 0:
+        return None
+    for _ in range(25):
+        idx = bisect.bisect_left(cumulative, rng.random() * total)
+        if idx >= len(items):
+            idx = len(items) - 1
+        c1, c2, _ = items[idx]
+        if c1 not in dead and c2 not in dead:
+            return c1, c2
+    for c1, c2, _ in items:
+        if c1 not in dead and c2 not in dead:
+            return c1, c2
+    return None
+
+
+def _estimate_equity(hero_cards, board_cards, villain_range, samples=600, rng=None):
+    if len(hero_cards) < 2 or not villain_range or not villain_range.get("items"):
+        return None
+    board_cards = list(board_cards)
+    known = set(hero_cards) | set(board_cards)
+    need_board = max(0, 5 - len(board_cards))
+    rng = rng or random.Random(0)
+
+    if need_board == 0:
+        hero_rank = _eval7_rank(list(hero_cards) + board_cards)
+        total_weight = 0.0
+        win_weight = 0.0
+        for c1, c2, weight in villain_range["items"]:
+            if c1 in known or c2 in known:
+                continue
+            villain_rank = _eval7_rank([c1, c2] + board_cards)
+            total_weight += weight
+            if hero_rank > villain_rank:
+                win_weight += weight
+            elif hero_rank == villain_rank:
+                win_weight += 0.5 * weight
+        return _clamp(win_weight / total_weight if total_weight else 0.5)
+
+    deck = [card for card in FULL_DECK if card not in known]
+    wins = 0.0
+    trials = 0
+    target = max(1, int(samples))
+    while trials < target:
+        villain = _weighted_combo_choice(villain_range, known, rng)
+        if villain is None:
+            break
+        remaining = [card for card in deck if card not in villain]
+        if len(remaining) < need_board:
+            break
+        runout = rng.sample(remaining, need_board)
+        final_board = board_cards + runout
+        hero_rank = _eval7_rank(list(hero_cards) + final_board)
+        villain_rank = _eval7_rank(list(villain) + final_board)
+        if hero_rank > villain_rank:
+            wins += 1.0
+        elif hero_rank == villain_rank:
+            wins += 0.5
+        trials += 1
+    return _clamp(wins / trials) if trials else None
+
+
+def _estimate_state_equity(state, samples=None):
+    board_cards = list(state.get("community_cards", []))
+    villain_range = _build_heads_up_villain_range(state, board_cards)
+    if villain_range is None:
+        return None
+    if samples is None:
+        street_samples = {"flop": 600, "turn": 500, "river": 0}
+        samples = street_samples.get(state.get("street"), 400)
+    rng = random.Random(_stable_seed_for_state(state, board_cards))
+    return _estimate_equity(state.get("your_cards", []), board_cards, villain_range, samples=samples, rng=rng)
+
+
+def _equity_realization_factor(state, info):
+    street = state.get("street")
+    factor = {"flop": 0.88, "turn": 0.94, "river": 1.00}.get(street, 0.92)
+    if _postflop_in_position(state):
+        factor += 0.05
+    else:
+        factor -= 0.07
+    if info.get("combo_draw") or (info.get("flush_draw") and info.get("oesd")):
+        factor += 0.04
+    if info.get("gutshot") or info.get("overcards"):
+        factor -= 0.02
+    opponent = _opponent_label(state)
+    if opponent in {"aggressive", "nit", "tight_passive"} and street in {"flop", "turn"}:
+        factor -= 0.04
+    if opponent == "calling_station":
+        factor += 0.03
+    return _clamp(factor, 0.65, 1.10)
+
+
+def _call_margin(state):
+    owed = max(0, int(state.get("amount_owed", 0)))
+    pot = max(1, int(state.get("pot", 1)))
+    if owed > pot:
+        return 0.035
+    return {"flop": 0.025, "turn": 0.020, "river": 0.012}.get(state.get("street"), 0.025)
+
+
+def _fold_equity_estimate(state, bet_fraction, board, role):
+    model = _primary_opponent_model(state)
+    label = _label_for_model(model)
+    base = {
+        "overfolder": 0.58,
+        "nit": 0.46,
+        "tight_passive": 0.42,
+        "unknown": 0.36,
+        "aggressive": 0.31,
+        "calling_station": 0.18,
+    }.get(label, 0.34)
+    if model and model.cb_opps >= 6:
+        base = (base + model.bayes_fold_to_cbet) * 0.5
+    base += (bet_fraction - 0.50) * 0.18
+    if board["is_static"] or board["paired"]:
+        base += 0.04
+    if board["is_dynamic"] or board["monotone"]:
+        base -= 0.04
+    if role in {"IP_PFA", "OOP_PFA"}:
+        base += 0.04
+    return _clamp(base, 0.05, 0.72)
+
+
+def _should_semi_bluff(state, info, board, role, bet_fraction, equity=None):
+    if len(_opponents_in_hand(state)) != 1:
+        return False
+    if equity is None:
+        equity = _estimate_state_equity(state)
+    if equity is None:
+        return False
+    pot = max(1, int(state.get("pot", 1)))
+    hero_bet = int(state.get("your_bet_this_street", 0))
+    target = max(int(state.get("min_raise_to", 0)), hero_bet + int(round(pot * bet_fraction)))
+    bet_cost = max(1, target - hero_bet)
+    fold_equity = _fold_equity_estimate(state, bet_fraction, board, role)
+    final_pot = pot + bet_cost * 2
+    ev = fold_equity * pot + (1.0 - fold_equity) * (equity * final_pot - bet_cost)
+    return ev > max(0, pot * 0.015)
+
+
 def _facing_postflop_bet(state, info, board):
     owed = int(state.get("amount_owed", 0))
     pot = max(1, int(state.get("pot", 1)))
-    price = owed / max(1, pot + owed)
-    street = state.get("street")
-    opponent = _opponent_label(state)
-    big_bet = owed > pot * 0.65
-    passive_big_bet = opponent in {"nit", "tight_passive"} and street in {"turn", "river"} and big_bet
-
-    if info["strength"] == "monster":
-        if street != "river" and not board["monotone"]:
-            return _bet_fraction(state, 0.75)
-        return {"action": "call"}
-
-    if passive_big_bet and info["strength"] in {"tptk_plus", "top_pair", "medium_pair"} and not info["nut_flush_blocker"]:
+    required = owed / max(1, pot + owed)
+    equity = _estimate_state_equity(state)
+    if equity is None:
         return {"action": "fold"}
-
-    if info["strength"] == "tptk_plus":
-        if street == "river" and (board["monotone"] or board["straight_potential"] >= 4) and big_bet:
-            return {"action": "call"} if info["nut_flush_blocker"] else {"action": "fold"}
+    if equity * _equity_realization_factor(state, info) >= required + _call_margin(state):
         return {"action": "call"}
-
-    if street == "river":
-        if info["strength"] == "top_pair" and not big_bet:
-            return {"action": "call"}
-        if info["strength"] in {"top_pair", "medium_pair"} and info["blocks_value"] and opponent == "aggressive":
-            return {"action": "call"}
-        return {"action": "fold"}
-
-    if info["strength"] == "top_pair":
-        if board["is_dynamic"] and big_bet and opponent != "calling_station":
-            return {"action": "fold"}
-        return {"action": "call"}
-
-    if info["strength"] == "medium_pair":
-        return {"action": "call"} if price <= 0.24 and not board["is_dynamic"] else {"action": "fold"}
-
-    if info["strength"] == "strong_draw":
-        return {"action": "call"} if price <= (0.38 if info["combo_draw"] else 0.30) else {"action": "fold"}
-
-    if info["strength"] == "weak_equity":
-        return {"action": "call"} if price <= 0.16 and (info["gutshot"] or info["overcards"]) else {"action": "fold"}
-
     return {"action": "fold"}
 
 
@@ -1969,6 +2379,9 @@ def _flop_decision(state, info, board, role):
             if info["strength"] in {"air", "weak_equity"} and opponent == "overfolder":
                 if not _good_flop_bluff(info, board, role):
                     return {"action": "check"}
+            if info["strength"] in {"air", "weak_equity", "strong_draw"}:
+                size = _postflop_size(state, board, info, role)
+                return _bet_fraction(state, size) if _should_semi_bluff(state, info, board, role, size) else {"action": "check"}
             if info["strength"] == "medium_pair" and role == "IP_PFA" and board["is_dynamic"]:
                 return {"action": "check"}
             return _bet_fraction(state, _postflop_size(state, board, info, role))
@@ -1978,9 +2391,10 @@ def _flop_decision(state, info, board, role):
         if info["strength"] == "top_pair":
             return {"action": "check"} if role == "IP_PFA" and board["is_dynamic"] else _bet_fraction(state, 0.50)
         if heads_up and opponent == "overfolder" and info["strength"] in {"weak_equity", "air"} and _good_flop_bluff(info, board, role):
-            return _bet_fraction(state, 0.33)
+            return _bet_fraction(state, 0.33) if _should_semi_bluff(state, info, board, role, 0.33) else {"action": "check"}
         if info["strength"] == "strong_draw" or _good_flop_bluff(info, board, role):
-            return _bet_fraction(state, _postflop_size(state, board, info, role))
+            size = _postflop_size(state, board, info, role)
+            return _bet_fraction(state, size) if _should_semi_bluff(state, info, board, role, size) else {"action": "check"}
         return {"action": "check"}
 
     if role == "IP_CALLER":
@@ -1989,11 +2403,13 @@ def _flop_decision(state, info, board, role):
         if info["strength"] in {"monster", "tptk_plus", "strong_draw"}:
             return _bet_fraction(state, _postflop_size(state, board, info, role))
         if info["strength"] == "air" and (board["is_static"] or info["nut_flush_blocker"]):
-            return _bet_fraction(state, 0.33)
+            return _bet_fraction(state, 0.33) if _should_semi_bluff(state, info, board, role, 0.33) else {"action": "check"}
         return {"action": "check"}
 
-    if info["strength"] in {"monster", "strong_draw"} and board["is_dynamic"]:
+    if info["strength"] == "monster" and board["is_dynamic"]:
         return _bet_fraction(state, 0.67)
+    if info["strength"] == "strong_draw" and board["is_dynamic"]:
+        return _bet_fraction(state, 0.67) if _should_semi_bluff(state, info, board, role, 0.67) else {"action": "check"}
     return {"action": "check"}
 
 
@@ -2014,19 +2430,24 @@ def _turn_decision(state, info, board, role):
         return {"action": "check"}
 
     if flop_checked and oop and _turn_favors_probe(board):
-        if info["strength"] in {"top_pair", "strong_draw"} or _good_flop_bluff(info, board, role):
+        if info["strength"] == "top_pair":
             return _bet_fraction(state, _postflop_size(state, board, info, role))
+        if info["strength"] == "strong_draw" or _good_flop_bluff(info, board, role):
+            size = _postflop_size(state, board, info, role)
+            return _bet_fraction(state, size) if _should_semi_bluff(state, info, board, role, size) else {"action": "check"}
         return {"action": "check"}
 
     if flop_bet and role in {"IP_PFA", "OOP_PFA"}:
         if info["strength"] in {"top_pair", "strong_draw"}:
             return _bet_fraction(state, _postflop_size(state, board, info, role))
         if info["strength"] in {"weak_equity", "air"} and _scare_turn_for_pfa(board):
-            return _bet_fraction(state, 0.67)
+            return _bet_fraction(state, 0.67) if _should_semi_bluff(state, info, board, role, 0.67) else {"action": "check"}
         return {"action": "check"}
 
-    if role == "IP_CALLER" and info["strength"] in {"top_pair", "strong_draw"} and board["is_dynamic"]:
+    if role == "IP_CALLER" and info["strength"] == "top_pair" and board["is_dynamic"]:
         return _bet_fraction(state, 0.67)
+    if role == "IP_CALLER" and info["strength"] == "strong_draw" and board["is_dynamic"]:
+        return _bet_fraction(state, 0.67) if _should_semi_bluff(state, info, board, role, 0.67) else {"action": "check"}
 
     return {"action": "check"}
 
@@ -2043,7 +2464,8 @@ def _river_decision(state, info, board, role):
     if info["strength"] == "top_pair" and opponent == "calling_station" and board["is_static"]:
         return _bet_fraction(state, _postflop_size(state, board, info, role))
     if opponent != "calling_station" and info["strength"] in {"air", "weak_equity"} and info["nut_flush_blocker"] and role in {"IP_PFA", "IP_CALLER"}:
-        return _bet_fraction(state, _postflop_size(state, board, info, role))
+        size = _postflop_size(state, board, info, role)
+        return _bet_fraction(state, size) if _should_semi_bluff(state, info, board, role, size) else {"action": "check"}
     return {"action": "check"}
 
 
