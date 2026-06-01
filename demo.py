@@ -35,14 +35,14 @@ BOT_PATHS = {
     "The Mathematician": "bots/mathematician.py",
     # "The Shark": "bots/shark.py",
     # "Loose passive": "bots/loose_passive.py",
-    "The Complete Bot": "bots/my_bots/complete.py",
+    "Complete v1": "bots/my_bots/complete_v1.py",
     "Complete no exploit": "bots/my_bots/complete_no_opponent_model.py",
     "BlackRain79": "bots/my_bots/blackrain79.py",
     # "G5 Bot": "bots/my_bots/g5-bot.py",
-    "Randomized Bot": "bots/my_bots/complete_randomized.py",
+    "Complete v2": "bots/my_bots/complete_v2.py",
 }
 
-MY_BOT_PATH = "bots/my_bots/complete.py"
+MY_BOT_PATH = "bots/my_bots/complete_v2.py"
 RUN_HANDS_COUNT = 500
 ROUND_ROBIN_HANDS = 500
 
