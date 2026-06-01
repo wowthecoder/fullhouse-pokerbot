@@ -24,7 +24,7 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parent
-FULLHOUSE_BOT_PATH = ROOT / "bots" / "my_bots" / "complete.py"
+FULLHOUSE_BOT_PATH = ROOT / "bots" / "my_bots" / "complete_v1.py"
 DEFAULT_WS_URL = "wss://openpoker.ai/ws"
 DEFAULT_BUY_IN = 2000.0
 load_dotenv()

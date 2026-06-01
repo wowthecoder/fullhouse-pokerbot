@@ -1,4 +1,11 @@
-"""PokerCoaching-chart preflop bot for Fullhouse poker."""
+"""V1 with the following fixes and enhancements: {}"""
+
+from math import erf, sqrt
+
+try:
+    from scipy.stats import beta as _beta_dist
+except Exception:
+    _beta_dist = None
 
 BOT_NAME = "PokerCoaching Preflop"
 BOT_AVATAR = "robot_1"
@@ -30,9 +37,281 @@ MIN_POSTFLOP_ACTIONS = 8
 OPPONENT_MODELS = {}
 HAND_OBSERVATIONS = {}
 
+RATE_SPECS = {
+    "vpip": {
+        "success_attr": "vpip_hands",
+        "opp_attr": "hands",
+        "prior_rate": 0.24,
+        "prior_weight": 30,
+        "min_opp_soft": 20,
+        "min_opp_hard": 50,
+    },
+    "pfr": {
+        "success_attr": "pfr_hands",
+        "opp_attr": "hands",
+        "prior_rate": 0.18,
+        "prior_weight": 30,
+        "min_opp_soft": 20,
+        "min_opp_hard": 50,
+    },
+    "threebet": {
+        "success_attr": "threebets",
+        "opp_attr": "threebet_opps",
+        "prior_rate": 0.07,
+        "prior_weight": 20,
+        "min_opp_soft": 10,
+        "min_opp_hard": 25,
+    },
+    "fold_to_steal": {
+        "success_attr": "folded_to_steal",
+        "opp_attr": "steal_opps",
+        "prior_rate": 0.55,
+        "prior_weight": 20,
+        "min_opp_soft": 8,
+        "min_opp_hard": 20,
+    },
+    "fold_to_threebet": {
+        "success_attr": "folded_to_threebet",
+        "opp_attr": "faced_threebet",
+        "prior_rate": 0.50,
+        "prior_weight": 20,
+        "min_opp_soft": 8,
+        "min_opp_hard": 20,
+    },
+    "fourbet": {
+        "success_attr": "fourbets",
+        "opp_attr": "fourbet_opps",
+        "prior_rate": 0.06,
+        "prior_weight": 20,
+        "min_opp_soft": 8,
+        "min_opp_hard": 20,
+    },
+    "fold_to_cbet": {
+        "success_attr": "cb_folds",
+        "opp_attr": "cb_opps",
+        "prior_rate": 0.45,
+        "prior_weight": 20,
+        "min_opp_soft": 8,
+        "min_opp_hard": 25,
+    },
+    "wtsd": {
+        "success_attr": "showdown_hands",
+        "opp_attr": "saw_flop_hands",
+        "prior_rate": 0.27,
+        "prior_weight": 30,
+        "min_opp_soft": 15,
+        "min_opp_hard": 40,
+    },
+    "postflop_aggression_frequency": {
+        "success_attr": "postflop_bets_raises",
+        "opp_attr": "postflop_actions",
+        "prior_rate": 0.38,
+        "prior_weight": 20,
+        "min_opp_soft": 12,
+        "min_opp_hard": 30,
+    },
+}
+
 
 def _bayes_rate(successes, opportunities, prior_rate, prior_weight):
     return (successes + prior_rate * prior_weight) / max(1, opportunities + prior_weight)
+
+
+def _clamp(value, lo=0.0, hi=1.0):
+    return max(lo, min(hi, value))
+
+
+def _norm_cdf(value):
+    return 0.5 * (1.0 + erf(value / sqrt(2.0)))
+
+
+def _beta_params(successes, opportunities, prior_rate, prior_weight):
+    successes = max(0, int(successes))
+    opportunities = max(0, int(opportunities))
+    failures = max(0, opportunities - successes)
+    alpha = prior_rate * prior_weight + successes
+    beta = (1.0 - prior_rate) * prior_weight + failures
+    return max(alpha, 1e-9), max(beta, 1e-9)
+
+
+def _beta_mean(successes, opportunities, prior_rate, prior_weight):
+    alpha, beta = _beta_params(successes, opportunities, prior_rate, prior_weight)
+    return alpha / (alpha + beta)
+
+
+def _beta_var_from_params(alpha, beta):
+    total = alpha + beta
+    return (alpha * beta) / ((total * total) * (total + 1.0))
+
+
+def _beta_interval(successes, opportunities, prior_rate, prior_weight, level=0.80):
+    alpha, beta = _beta_params(successes, opportunities, prior_rate, prior_weight)
+    tail = (1.0 - level) / 2.0
+    if _beta_dist is not None:
+        return (
+            float(_beta_dist.ppf(tail, alpha, beta)),
+            float(_beta_dist.ppf(1.0 - tail, alpha, beta)),
+        )
+
+    mean = alpha / (alpha + beta)
+    sd = sqrt(max(1e-12, _beta_var_from_params(alpha, beta)))
+    z_by_level = {
+        0.80: 1.28155,
+        0.85: 1.43953,
+        0.90: 1.64485,
+        0.95: 1.95996,
+    }
+    z = z_by_level.get(level, 1.28155)
+    return _clamp(mean - z * sd), _clamp(mean + z * sd)
+
+
+def _posterior_prob_above(successes, opportunities, prior_rate, prior_weight, threshold):
+    alpha, beta = _beta_params(successes, opportunities, prior_rate, prior_weight)
+    threshold = _clamp(threshold)
+    if _beta_dist is not None:
+        return float(_beta_dist.sf(threshold, alpha, beta))
+
+    mean = alpha / (alpha + beta)
+    sd = sqrt(max(1e-12, _beta_var_from_params(alpha, beta)))
+    return 1.0 - _norm_cdf((threshold - mean) / sd)
+
+
+def _posterior_prob_below(successes, opportunities, prior_rate, prior_weight, threshold):
+    alpha, beta = _beta_params(successes, opportunities, prior_rate, prior_weight)
+    threshold = _clamp(threshold)
+    if _beta_dist is not None:
+        return float(_beta_dist.cdf(threshold, alpha, beta))
+
+    mean = alpha / (alpha + beta)
+    sd = sqrt(max(1e-12, _beta_var_from_params(alpha, beta)))
+    return _norm_cdf((threshold - mean) / sd)
+
+
+def _rate_counts(model, stat_name):
+    spec = RATE_SPECS[stat_name]
+    successes = int(getattr(model, spec["success_attr"], 0))
+    opportunities = int(getattr(model, spec["opp_attr"], 0))
+    return successes, opportunities, spec
+
+
+def _rate_estimate(model, stat_name, interval_level=0.80):
+    successes, opportunities, spec = _rate_counts(model, stat_name)
+    mean = _beta_mean(successes, opportunities, spec["prior_rate"], spec["prior_weight"])
+    lo, hi = _beta_interval(
+        successes,
+        opportunities,
+        spec["prior_rate"],
+        spec["prior_weight"],
+        level=interval_level,
+    )
+    return {
+        "successes": successes,
+        "opportunities": opportunities,
+        "mean": mean,
+        "lo": lo,
+        "hi": hi,
+    }
+
+
+def _likely_above(model, stat_name, threshold, confidence=0.85, min_opp=None):
+    successes, opportunities, spec = _rate_counts(model, stat_name)
+    if min_opp is None:
+        min_opp = spec["min_opp_soft"]
+    if opportunities < min_opp:
+        return False
+    probability = _posterior_prob_above(
+        successes,
+        opportunities,
+        spec["prior_rate"],
+        spec["prior_weight"],
+        threshold,
+    )
+    return probability >= confidence
+
+
+def _likely_below(model, stat_name, threshold, confidence=0.85, min_opp=None):
+    successes, opportunities, spec = _rate_counts(model, stat_name)
+    if min_opp is None:
+        min_opp = spec["min_opp_soft"]
+    if opportunities < min_opp:
+        return False
+    probability = _posterior_prob_below(
+        successes,
+        opportunities,
+        spec["prior_rate"],
+        spec["prior_weight"],
+        threshold,
+    )
+    return probability >= confidence
+
+
+def _exploit_strength_above(model, stat_name, threshold, min_opp_soft=None):
+    successes, opportunities, spec = _rate_counts(model, stat_name)
+    if min_opp_soft is None:
+        min_opp_soft = spec["min_opp_soft"]
+    if opportunities < min_opp_soft:
+        return 0.0
+    probability = _posterior_prob_above(
+        successes,
+        opportunities,
+        spec["prior_rate"],
+        spec["prior_weight"],
+        threshold,
+    )
+    return _clamp((probability - 0.55) / 0.35)
+
+
+def _exploit_strength_below(model, stat_name, threshold, min_opp_soft=None):
+    successes, opportunities, spec = _rate_counts(model, stat_name)
+    if min_opp_soft is None:
+        min_opp_soft = spec["min_opp_soft"]
+    if opportunities < min_opp_soft:
+        return 0.0
+    probability = _posterior_prob_below(
+        successes,
+        opportunities,
+        spec["prior_rate"],
+        spec["prior_weight"],
+        threshold,
+    )
+    return _clamp((probability - 0.55) / 0.35)
+
+
+def _add_rate_debug(snapshot, model, stat_name):
+    est80 = _rate_estimate(model, stat_name, interval_level=0.80)
+    est90 = _rate_estimate(model, stat_name, interval_level=0.90)
+    snapshot[f"{stat_name}_successes"] = est80["successes"]
+    snapshot[f"{stat_name}_opps"] = est80["opportunities"]
+    snapshot[f"{stat_name}_mean"] = est80["mean"]
+    snapshot[f"{stat_name}_lo80"] = est80["lo"]
+    snapshot[f"{stat_name}_hi80"] = est80["hi"]
+    snapshot[f"{stat_name}_lo90"] = est90["lo"]
+    snapshot[f"{stat_name}_hi90"] = est90["hi"]
+
+
+def _increment_bucket(counter, bucket, amount=1):
+    counter[bucket] = counter.get(bucket, 0) + amount
+
+
+def _bucket_rates(successes, opportunities):
+    return {
+        bucket: successes.get(bucket, 0) / max(1, count)
+        for bucket, count in opportunities.items()
+    }
+
+
+def _preflop_size_bucket(amount, big_blind):
+    size_bb = int(amount or 0) / max(1, big_blind)
+    if size_bb <= 2.5:
+        return "small"
+    if size_bb <= 3.5:
+        return "standard"
+    return "large"
+
+
+def _postflop_large_bet(entry, pot):
+    amount = int(entry.get("amount") or 0)
+    return amount >= max(1, int(pot or 0)) * 0.65
 
 
 class OppModel:
@@ -57,44 +336,25 @@ class OppModel:
         self.cb_folds = 0
         self.saw_flop_hands = 0
         self.showdown_hands = 0
-
-    def update_from_action_log(self, log, my_seat):
-        """Fallback parser for richer historical logs; live tracking is preferred."""
-        preflop_raises = 0
-        saw_threebet_opp = False
-        saw_vpip = False
-        saw_pfr = False
-        self.hands += 1
-        for entry in log:
-            if entry.get("seat") == my_seat:
-                continue
-            if self.last_seen_seat is not None and entry.get("seat") != self.last_seen_seat:
-                continue
-            action = entry.get("action")
-            street = entry.get("street", "preflop")
-            if action in ("small_blind", "big_blind"):
-                continue
-            if street == "preflop":
-                if preflop_raises == 1 and action in ("fold", "call", "raise", "all_in") and not saw_threebet_opp:
-                    self.threebet_opps += 1
-                    if action in ("raise", "all_in"):
-                        self.threebets += 1
-                    saw_threebet_opp = True
-                if action in ("call", "raise", "all_in"):
-                    saw_vpip = True
-                if action in ("raise", "all_in"):
-                    saw_pfr = True
-                    preflop_raises += 1
-            elif action in ("raise", "all_in"):
-                self.postflop_bets_raises += 1
-                self.postflop_actions += 1
-            elif street != "preflop" and action == "call":
-                self.postflop_calls += 1
-                self.postflop_actions += 1
-        if saw_vpip:
-            self.vpip_hands += 1
-        if saw_pfr:
-            self.pfr_hands += 1
+        self.fold_to_steal_opps_by_stealer = {}
+        self.folded_to_steal_by_stealer = {}
+        self.bb_defend_opps_by_size = {}
+        self.bb_defend_folds_by_size = {}
+        self.bb_defend_calls_by_size = {}
+        self.bb_defend_raises_by_size = {}
+        self.cb_opps_by_pot_type = {}
+        self.cb_folds_by_pot_type = {}
+        self.turn_after_flop_call_opps = 0
+        self.turn_after_flop_call_folds = 0
+        self.turn_after_flop_call_calls = 0
+        self.turn_after_flop_call_raises = 0
+        self.river_bets_raises = 0
+        self.river_calls = 0
+        self.river_folds = 0
+        self.river_checks = 0
+        self.river_actions = 0
+        self.street_bets_raises = {"flop": 0, "turn": 0, "river": 0}
+        self.street_large_bets = {"flop": 0, "turn": 0, "river": 0}
 
     @property
     def vpip(self):
@@ -169,11 +429,27 @@ class OppModel:
         return _bayes_rate(self.showdown_hands, self.saw_flop_hands, 0.27, 30)
 
     @property
+    def bayes_postflop_aggression_frequency(self):
+        return _bayes_rate(self.postflop_bets_raises, self.postflop_actions, 0.38, 20)
+
+    @property
     def trusted(self):
         return self.hands >= MIN_TRUSTED_HANDS
 
     def snapshot(self):
-        return {
+        bb_defend_vs_size = {}
+        for bucket, opps in self.bb_defend_opps_by_size.items():
+            folds = self.bb_defend_folds_by_size.get(bucket, 0)
+            calls = self.bb_defend_calls_by_size.get(bucket, 0)
+            raises = self.bb_defend_raises_by_size.get(bucket, 0)
+            bb_defend_vs_size[bucket] = {
+                "opps": opps,
+                "folds": folds,
+                "calls": calls,
+                "raises": raises,
+                "defend_rate": (calls + raises) / max(1, opps),
+            }
+        snapshot = {
             "bot_id": self.bot_id,
             "last_seen_seat": self.last_seen_seat,
             "hands": self.hands,
@@ -203,7 +479,36 @@ class OppModel:
             "bayes_fourbet": self.bayes_fourbet,
             "bayes_fold_to_cbet": self.bayes_fold_to_cbet,
             "bayes_wtsd": self.bayes_wtsd,
+            "bayes_postflop_aggression_frequency": self.bayes_postflop_aggression_frequency,
+            "fold_to_steal_by_stealer": _bucket_rates(
+                self.folded_to_steal_by_stealer,
+                self.fold_to_steal_opps_by_stealer,
+            ),
+            "fold_to_steal_opps_by_stealer": dict(self.fold_to_steal_opps_by_stealer),
+            "bb_defend_vs_size": bb_defend_vs_size,
+            "fold_to_cbet_by_pot_type": _bucket_rates(self.cb_folds_by_pot_type, self.cb_opps_by_pot_type),
+            "cbet_opps_by_pot_type": dict(self.cb_opps_by_pot_type),
+            "turn_after_flop_call_opps": self.turn_after_flop_call_opps,
+            "turn_fold_after_flop_call": self.turn_after_flop_call_folds / max(1, self.turn_after_flop_call_opps),
+            "turn_after_flop_call_calls": self.turn_after_flop_call_calls,
+            "turn_after_flop_call_raises": self.turn_after_flop_call_raises,
+            "river_tendencies": {
+                "actions": self.river_actions,
+                "bet_raise": self.river_bets_raises,
+                "call": self.river_calls,
+                "fold": self.river_folds,
+                "check": self.river_checks,
+                "bet_raise_rate": self.river_bets_raises / max(1, self.river_actions),
+                "call_rate": self.river_calls / max(1, self.river_actions),
+                "fold_rate": self.river_folds / max(1, self.river_actions),
+            },
+            "large_bet_frequency_by_street": _bucket_rates(self.street_large_bets, self.street_bets_raises),
         }
+        for stat_name in RATE_SPECS:
+            _add_rate_debug(snapshot, self, stat_name)
+        snapshot["label_v2"] = _label_for_model(self)
+        snapshot["read"] = _villain_read(self)
+        return snapshot
 
 
 def _s(*hands):
@@ -682,9 +987,15 @@ def _new_hand_observation(state):
         "preflop_aggressor": None,
         "preflop_callers": set(),
         "steal_raiser": None,
+        "steal_raiser_position": None,
+        "steal_open_amount": 0,
         "saw_flop_counted": False,
         "cbet_seen": False,
-        "cbet_pending": set(),
+        "cbet_pending": {},
+        "flop_bettor": None,
+        "flop_callers": set(),
+        "turn_after_flop_call_pending": set(),
+        "turn_after_flop_call_counted": set(),
     }
 
 
@@ -717,7 +1028,7 @@ def _count_saw_flop(state, obs):
     obs["saw_flop_counted"] = True
 
 
-def _observe_preflop_action(obs, entry, model, seat, positions):
+def _observe_preflop_action(obs, entry, model, seat, positions, big_blind):
     action = entry.get("action")
     prior_raises = obs["preflop_raise_count"]
     position = positions.get(seat)
@@ -739,6 +1050,20 @@ def _observe_preflop_action(obs, entry, model, seat, positions):
         model.steal_opps += 1
         if action == "fold":
             model.folded_to_steal += 1
+        stealer_position = obs.get("steal_raiser_position")
+        if stealer_position in {"BTN", "SB"}:
+            _increment_bucket(model.fold_to_steal_opps_by_stealer, stealer_position)
+            if action == "fold":
+                _increment_bucket(model.folded_to_steal_by_stealer, stealer_position)
+        if position == "BB":
+            size_bucket = _preflop_size_bucket(obs.get("steal_open_amount"), big_blind)
+            _increment_bucket(model.bb_defend_opps_by_size, size_bucket)
+            if action == "fold":
+                _increment_bucket(model.bb_defend_folds_by_size, size_bucket)
+            elif action == "call":
+                _increment_bucket(model.bb_defend_calls_by_size, size_bucket)
+            elif action in ("raise", "all_in"):
+                _increment_bucket(model.bb_defend_raises_by_size, size_bucket)
         obs["steal_opp_counted"].add(seat)
 
     if (
@@ -771,6 +1096,8 @@ def _observe_preflop_action(obs, entry, model, seat, positions):
             obs["preflop_first_raiser"] = seat
             if position in {"CO", "BTN", "SB"}:
                 obs["steal_raiser"] = seat
+                obs["steal_raiser_position"] = position
+                obs["steal_open_amount"] = int(entry.get("amount") or 0)
         elif prior_raises == 1:
             obs["preflop_second_raiser"] = seat
         obs["preflop_raise_count"] += 1
@@ -778,33 +1105,98 @@ def _observe_preflop_action(obs, entry, model, seat, positions):
         obs["preflop_callers"].clear()
 
 
-def _observe_postflop_action(obs, entry, model, seat, street, seat_to_bot):
+def _pot_type_from_preflop_raises(raises):
+    if raises >= 2:
+        return "3bet"
+    if raises == 1:
+        return "srp"
+    return "limped"
+
+
+def _record_turn_after_flop_call_opportunities(obs, bettor_seat, seat_to_bot):
+    for target in set(obs["flop_callers"]):
+        if target == bettor_seat or target in obs["turn_after_flop_call_counted"]:
+            continue
+        target_model = _model_for(seat_to_bot.get(target), target)
+        if target_model:
+            target_model.turn_after_flop_call_opps += 1
+            obs["turn_after_flop_call_pending"].add(target)
+            obs["turn_after_flop_call_counted"].add(target)
+
+
+def _observe_postflop_action(obs, entry, model, seat, street, seat_to_bot, pot):
     action = entry.get("action")
     if action in ("raise", "all_in"):
         if model:
             model.postflop_bets_raises += 1
             model.postflop_actions += 1
+            if street in model.street_bets_raises:
+                model.street_bets_raises[street] += 1
+                if _postflop_large_bet(entry, pot):
+                    model.street_large_bets[street] += 1
+            if street == "river":
+                model.river_bets_raises += 1
+                model.river_actions += 1
+            if street == "turn" and seat in obs["turn_after_flop_call_pending"]:
+                model.turn_after_flop_call_raises += 1
+        if street == "flop" and obs["flop_bettor"] is None:
+            obs["flop_bettor"] = seat
+        if street == "turn":
+            _record_turn_after_flop_call_opportunities(obs, seat, seat_to_bot)
+            obs["turn_after_flop_call_pending"].discard(seat)
         if street == "flop" and not obs["cbet_seen"] and seat == obs["preflop_aggressor"]:
             obs["cbet_seen"] = True
+            pot_type = _pot_type_from_preflop_raises(obs["preflop_raise_count"])
             for target in set(obs["preflop_callers"]):
                 if target == seat:
                     continue
                 target_model = _model_for(seat_to_bot.get(target), target)
                 if target_model:
                     target_model.cb_opps += 1
-                    obs["cbet_pending"].add(target)
+                    _increment_bucket(target_model.cb_opps_by_pot_type, pot_type)
+                    obs["cbet_pending"][target] = pot_type
     elif action == "call":
         if model:
             model.postflop_calls += 1
             model.postflop_actions += 1
-        obs["cbet_pending"].discard(seat)
+            if street == "river":
+                model.river_calls += 1
+                model.river_actions += 1
+        if street == "flop" and obs["flop_bettor"] is not None and seat != obs["flop_bettor"]:
+            obs["flop_callers"].add(seat)
+        if street == "turn" and seat in obs["turn_after_flop_call_pending"]:
+            if model:
+                model.turn_after_flop_call_calls += 1
+            obs["turn_after_flop_call_pending"].discard(seat)
+        obs["cbet_pending"].pop(seat, None)
     elif action == "fold" and seat in obs["cbet_pending"]:
         if model:
             model.postflop_actions += 1
             model.cb_folds += 1
-        obs["cbet_pending"].discard(seat)
+            _increment_bucket(model.cb_folds_by_pot_type, obs["cbet_pending"][seat])
+            if seat in obs["turn_after_flop_call_pending"]:
+                model.turn_after_flop_call_folds += 1
+                if street == "river":
+                    model.river_folds += 1
+                    model.river_actions += 1
+        obs["cbet_pending"].pop(seat, None)
+        obs["turn_after_flop_call_pending"].discard(seat)
+    elif action == "fold" and seat in obs["turn_after_flop_call_pending"]:
+        if model:
+            model.postflop_actions += 1
+            model.turn_after_flop_call_folds += 1
+            if street == "river":
+                model.river_folds += 1
+                model.river_actions += 1
+        obs["turn_after_flop_call_pending"].discard(seat)
     elif action in {"check", "fold"} and model:
         model.postflop_actions += 1
+        if street == "river":
+            if action == "check":
+                model.river_checks += 1
+            elif action == "fold":
+                model.river_folds += 1
+            model.river_actions += 1
     elif action == "showdown" and model:
         model.showdown_hands += 1
 
@@ -828,6 +1220,7 @@ def _update_opponent_models(state):
     hero_seat = state.get("seat_to_act")
     seat_to_bot = _seat_to_bot_id(state)
     positions = _seat_positions(state)
+    _, big_blind = _blind_amounts(state)
     street = state.get("street", "preflop")
     actions = state.get("action_log", [])
     start = min(obs["processed_actions"], len(actions))
@@ -845,9 +1238,9 @@ def _update_opponent_models(state):
         bot_id = seat_to_bot.get(seat)
         model = None if seat == hero_seat else _model_for(bot_id, seat)
         if entry_street == "preflop":
-            _observe_preflop_action(obs, annotated, model, seat, positions)
+            _observe_preflop_action(obs, annotated, model, seat, positions, big_blind)
         else:
-            _observe_postflop_action(obs, annotated, model, seat, entry_street, seat_to_bot)
+            _observe_postflop_action(obs, annotated, model, seat, entry_street, seat_to_bot, state.get("pot", 0))
         obs["processed_actions"] += 1
 
 
@@ -1242,66 +1635,183 @@ def _street_checked_through(state, street):
     return bool(actions) and all(entry.get("action") == "check" for entry in actions)
 
 
-def _primary_opponent_model(state):
-    opponents = _opponents_in_hand(state)
-    if not opponents:
-        return None
-    seat_to_bot = _seat_to_bot_id(state)
-    bot_id = seat_to_bot.get(opponents[0].get("seat")) or opponents[0].get("bot_id")
-    return OPPONENT_MODELS.get(bot_id)
-
-
 def _model_for_seat(state, seat):
     bot_id = _seat_to_bot_id(state).get(seat)
     return OPPONENT_MODELS.get(bot_id)
 
 
+def _last_bettor_or_raiser_on_street(state, street=None):
+    hero = state.get("seat_to_act")
+    for entry in reversed(_postflop_actions(state, street or state.get("street"))):
+        if entry.get("seat") != hero and entry.get("action") in {"raise", "all_in"}:
+            return entry.get("seat")
+    return None
+
+
+def _danger_score(model):
+    label = _label_for_model(model)
+    label_score = {
+        "calling_station": 60,
+        "aggressive": 55,
+        "unknown": 40,
+        "nit": 30,
+        "tight_passive": 25,
+        "overfolder": 10,
+    }.get(label, 40)
+    return (
+        label_score,
+        model.postflop_aggression_frequency,
+        1.0 - model.bayes_fold_to_cbet,
+        model.hands,
+    )
+
+
+def _most_dangerous_opponent_model(state, opponents):
+    models = []
+    for player in opponents:
+        model = _model_for_seat(state, player.get("seat"))
+        if model:
+            models.append(model)
+    if not models:
+        return None
+    return max(models, key=_danger_score)
+
+
+def _context_opponent_model(state):
+    opponents = _opponents_in_hand(state)
+    if not opponents:
+        return None
+
+    street = state.get("street")
+    facing_bet = not state.get("can_check") or int(state.get("amount_owed", 0)) > 0
+    if street != "preflop" and facing_bet:
+        bettor = _last_bettor_or_raiser_on_street(state, street)
+        if bettor is not None:
+            model = _model_for_seat(state, bettor)
+            if model:
+                return model
+
+    if len(opponents) == 1:
+        return _model_for_seat(state, opponents[0].get("seat"))
+
+    return _most_dangerous_opponent_model(state, opponents)
+
+
+def _primary_opponent_model(state):
+    return _context_opponent_model(state)
+
+
+def _villain_read(model):
+    if not model:
+        return {
+            "label": "unknown",
+            "overfold_steal_score": 0.0,
+            "overfold_cbet_score": 0.0,
+            "station_score": 0.0,
+            "aggro_score": 0.0,
+            "nit_score": 0.0,
+            "tight_passive_score": 0.0,
+        }
+
+    overfold_steal = min(
+        _exploit_strength_above(model, "fold_to_steal", 0.68, min_opp_soft=8),
+        _exploit_strength_below(model, "threebet", 0.08, min_opp_soft=8),
+    )
+    overfold_cbet = _exploit_strength_above(model, "fold_to_cbet", 0.55, min_opp_soft=8)
+    loose_passive = min(
+        _exploit_strength_above(model, "vpip", 0.34, min_opp_soft=20),
+        _exploit_strength_below(model, "pfr", 0.16, min_opp_soft=20),
+        _exploit_strength_below(model, "postflop_aggression_frequency", 0.36, min_opp_soft=12),
+    )
+    sticky_postflop = min(
+        _exploit_strength_below(model, "fold_to_cbet", 0.38, min_opp_soft=8),
+        _exploit_strength_above(model, "wtsd", 0.32, min_opp_soft=15),
+    )
+    station = max(loose_passive, sticky_postflop)
+    aggro = max(
+        _exploit_strength_above(model, "threebet", 0.13, min_opp_soft=10),
+        _exploit_strength_above(model, "postflop_aggression_frequency", 0.48, min_opp_soft=12),
+    )
+    nit = min(
+        _exploit_strength_below(model, "vpip", 0.18, min_opp_soft=25),
+        _exploit_strength_below(model, "pfr", 0.13, min_opp_soft=25),
+        _exploit_strength_below(model, "threebet", 0.06, min_opp_soft=10),
+    )
+    tight_passive = min(
+        _exploit_strength_below(model, "vpip", 0.25, min_opp_soft=25),
+        _exploit_strength_below(model, "pfr", 0.12, min_opp_soft=25),
+        _exploit_strength_below(model, "postflop_aggression_frequency", 0.35, min_opp_soft=12),
+    )
+
+    scores = {
+        "overfolder": max(overfold_steal, overfold_cbet),
+        "calling_station": station,
+        "aggressive": aggro,
+        "nit": nit,
+        "tight_passive": tight_passive,
+    }
+    label = max(scores, key=scores.get)
+    if scores[label] < 0.45:
+        label = "unknown"
+
+    return {
+        "label": label,
+        "overfold_steal_score": overfold_steal,
+        "overfold_cbet_score": overfold_cbet,
+        "station_score": station,
+        "aggro_score": aggro,
+        "nit_score": nit,
+        "tight_passive_score": tight_passive,
+    }
+
+
 def _label_for_model(model):
     if not model:
         return "unknown"
-    if (
-        model.trusted
-        and model.bayes_vpip <= 0.18
-        and model.bayes_pfr <= 0.13
-        and model.bayes_threebet <= 0.06
-    ):
+
+    nit = (
+        _likely_below(model, "vpip", 0.18, confidence=0.80, min_opp=40)
+        and _likely_below(model, "pfr", 0.13, confidence=0.80, min_opp=40)
+        and _likely_below(model, "threebet", 0.06, confidence=0.75, min_opp=12)
+    )
+    if nit:
         return "nit"
-    if (
-        model.trusted
-        and model.bayes_vpip <= 0.25
-        and model.bayes_pfr <= 0.12
-        and model.af <= 1.2
-    ):
+
+    tight_passive = (
+        _likely_below(model, "vpip", 0.25, confidence=0.80, min_opp=40)
+        and _likely_below(model, "pfr", 0.12, confidence=0.80, min_opp=40)
+        and _likely_below(model, "postflop_aggression_frequency", 0.35, confidence=0.75, min_opp=15)
+    )
+    if tight_passive:
         return "tight_passive"
-    if (
-        model.trusted
-        and model.bayes_vpip >= 0.34
-        and model.bayes_pfr <= 0.16
-        and model.af <= 1.35
-    ) or (
-        model.cb_opps >= MIN_CBET_OPPS
-        and model.bayes_fold_to_cbet <= 0.38
-        and model.bayes_wtsd >= 0.32
-    ):
+
+    loose_passive = (
+        _likely_above(model, "vpip", 0.34, confidence=0.80, min_opp=40)
+        and _likely_below(model, "pfr", 0.16, confidence=0.75, min_opp=40)
+        and _likely_below(model, "postflop_aggression_frequency", 0.36, confidence=0.75, min_opp=15)
+    )
+    sticky_postflop = (
+        _likely_below(model, "fold_to_cbet", 0.38, confidence=0.80, min_opp=12)
+        and _likely_above(model, "wtsd", 0.32, confidence=0.75, min_opp=20)
+    )
+    if loose_passive or sticky_postflop:
         return "calling_station"
-    if (
-        model.cb_opps >= MIN_CBET_OPPS
-        and model.bayes_fold_to_cbet >= 0.55
-    ) or (
-        model.steal_opps >= MIN_STEAL_OPPS
-        and model.bayes_fold_to_steal >= 0.68
-        and model.bayes_threebet <= 0.08
-    ):
+
+    cbet_overfolder = _likely_above(model, "fold_to_cbet", 0.55, confidence=0.85, min_opp=12)
+    blind_overfolder = (
+        _likely_above(model, "fold_to_steal", 0.68, confidence=0.85, min_opp=10)
+        and _likely_below(model, "threebet", 0.08, confidence=0.75, min_opp=10)
+    )
+    if cbet_overfolder or blind_overfolder:
         return "overfolder"
-    if (
-        model.postflop_actions >= MIN_POSTFLOP_ACTIONS
-        and model.postflop_aggression_frequency >= 0.48
-        and model.af >= 2.0
-    ) or (
-        model.threebet_opps >= MIN_THREEBET_OPPS
-        and model.bayes_threebet >= 0.13
-    ):
+
+    postflop_aggressive = _likely_above(
+        model, "postflop_aggression_frequency", 0.48, confidence=0.85, min_opp=15
+    )
+    preflop_aggressive = _likely_above(model, "threebet", 0.13, confidence=0.85, min_opp=18)
+    if postflop_aggressive or preflop_aggressive:
         return "aggressive"
+
     return "unknown"
 
 
@@ -1909,15 +2419,19 @@ def _active_blind_models(state):
 
 
 def _all_blinds_overfold_to_steals(state):
+    return _blind_steal_exploit_score(state) >= 0.50
+
+
+def _blind_steal_exploit_score(state):
     models = _active_blind_models(state)
     if not models:
-        return False
-    return all(
-        model.steal_opps >= MIN_STEAL_OPPS
-        and model.bayes_fold_to_steal >= 0.68
-        and model.bayes_threebet <= 0.08
-        for model in models
-    )
+        return 0.0
+    scores = []
+    for model in models:
+        fold_strength = _exploit_strength_above(model, "fold_to_steal", 0.68, min_opp_soft=8)
+        low_3bet_strength = _exploit_strength_below(model, "threebet", 0.08, min_opp_soft=8)
+        scores.append(min(fold_strength, low_3bet_strength))
+    return min(scores) if scores else 0.0
 
 
 def _baseline_call_available(hand, situation):
@@ -1947,6 +2461,7 @@ def _apply_exploit_adjustments(action, hand, situation, state):
     if spot_type in {"vs_open", "bb_vs_sb_raise"}:
         opener = _model_for_seat(state, situation.get("opener_seat"))
         opener_label = _label_for_model(opener)
+        opener_read = _villain_read(opener)
         if opener_label in {"nit", "tight_passive"} and action in {"call", "3bet"} and hand in TIGHT_OPEN_FOLDS:
             return "fold"
         if (
@@ -1954,11 +2469,8 @@ def _apply_exploit_adjustments(action, hand, situation, state):
             and hand in LIGHT_THREEBET_BLUFFS
             and opener
             and (
-                opener_label == "calling_station"
-                or (
-                    opener.faced_threebet >= MIN_FOLD_TO_THREEBET_OPPS
-                    and opener.bayes_fold_to_threebet <= 0.45
-                )
+                opener_read["station_score"] >= 0.50
+                or _likely_below(opener, "fold_to_threebet", 0.45, confidence=0.80, min_opp=8)
             )
         ):
             return "call" if _baseline_call_available(hand, situation) else "fold"

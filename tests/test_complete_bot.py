@@ -5,7 +5,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from bots.my_bots import complete as bot
+from bots.my_bots import complete_v1 as bot
 
 
 @pytest.fixture(autouse=True)
