@@ -28,7 +28,9 @@ FULL_DECK = [rank + suit for rank in RANKS for suit in SUITS]
 EVAL7_CARD_CACHE = {}
 EQUITY_RANGE_CACHE = {}
 MAX_EQUITY_RANGE_CACHE = 128
-EQUITY_ESTIMATE_TIME_LIMIT_SECONDS = 1.8
+EQUITY_RESULT_CACHE = {}
+MAX_EQUITY_RESULT_CACHE = 256
+EQUITY_ESTIMATE_TIME_LIMIT_SECONDS = 0.8
 MIN_TIMEOUT_EQUITY_SAMPLES = 20
 MIN_TIMEOUT_EQUITY_SAMPLE_FRACTION = 0.12
 EVAL7_TYPE_MAP = {
@@ -2730,16 +2732,48 @@ def _estimate_equity(
     return _clamp(wins / trials) if trials else None
 
 
+def _cache_equity_result(key, value):
+    if len(EQUITY_RESULT_CACHE) >= MAX_EQUITY_RESULT_CACHE:
+        EQUITY_RESULT_CACHE.pop(next(iter(EQUITY_RESULT_CACHE)), None)
+    EQUITY_RESULT_CACHE[key] = value
+    return value
+
 def _estimate_state_equity(state, samples=None):
     board_cards = list(state.get("community_cards", []))
+
+    if samples is None:
+        street_samples = {"flop": 220, "turn": 160, "river": 0}
+        samples = street_samples.get(state.get("street"), 180)
+
+    actions_len = len(_observed_actions(state))
+    cache_key = (
+        state.get("hand_id"),
+        state.get("street"),
+        tuple(state.get("your_cards", [])),
+        tuple(board_cards),
+        int(state.get("pot", 0)),
+        int(state.get("amount_owed", 0)),
+        actions_len,
+        samples,
+    )
+
+    cached = EQUITY_RESULT_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
     villain_range = _build_heads_up_villain_range(state, board_cards)
     if villain_range is None:
         return None
-    if samples is None:
-        street_samples = {"flop": 400, "turn": 300, "river": 0}
-        samples = street_samples.get(state.get("street"), 300)
+
     rng = random.Random(_stable_seed_for_state(state, board_cards))
-    return _estimate_equity(state.get("your_cards", []), board_cards, villain_range, samples=samples, rng=rng)
+    equity = _estimate_equity(
+        state.get("your_cards", []),
+        board_cards,
+        villain_range,
+        samples=samples,
+        rng=rng,
+    )
+    return _cache_equity_result(cache_key, equity)
 
 
 def _equity_realization_factor(state, info):
@@ -3346,9 +3380,6 @@ def _river_estimated_bluff_density(context, label):
 def _river_facing_bet_decision(state, info, board, role):
     if state.get("street") != "river" or len(_opponents_in_hand(state)) != 1:
         return None
-    equity = _estimate_state_equity(state)
-    if equity is None:
-        return None
 
     label = _opponent_label(state)
     context = _river_context(state, info, board, role)
@@ -3363,6 +3394,9 @@ def _river_facing_bet_decision(state, info, board, role):
         return {"action": "fold"}
 
     if label == "aggressive" and context.get("missed_draw_density", 0.0) >= 0.25 and not context.get("hero_blocks_bluffs"):
+        equity = _estimate_state_equity(state)
+        if equity is None:
+            return None
         required = _required_call_equity(state)
         bluff_density = _river_estimated_bluff_density(context, label)
         if bluff_density >= required and equity >= max(0.10, required - 0.12):
@@ -3376,11 +3410,21 @@ def _facing_postflop_bet(state, info, board):
     required = _required_call_equity(state)
     equity = _estimate_state_equity(state)
     if equity is None:
-        return {"action": "fold"}
+        equity = _rule_based_equity_estimate(
+            state.get("your_cards", []),
+            state.get("community_cards", []),
+            None,
+        )
     label = _opponent_label(state)
     margin = _call_margin(state) + _exploit_call_margin_adjustment(state, label)
     realized = equity * _equity_realization_factor(state, info)
     if realized >= required + margin:
+        return {"action": "call"}
+
+    # Emergency protection for very strong hands when the heuristic undershoots.
+    if info.get("strength") == "monster":
+        return {"action": "call"}
+    if info.get("strength") == "tptk_plus" and required <= 0.38:
         return {"action": "call"}
 
     bet_math = _facing_bet_alpha_mdf(state)
@@ -3804,11 +3848,11 @@ def _choose_preflop_size(action, situation, state):
     if action == "3bet":
         multiplier = SIZING_RULES["ip_3bet_multiplier"] if hero_pos in {"HJ", "CO", "BTN"} else SIZING_RULES["oop_3bet_multiplier"]
         return open_amount * multiplier
+    if action == "4bet" and _effective_stack_bb(state) < 40:
+        return int(state.get("your_bet_this_street", 0)) + int(state.get("your_stack", 0))
     if action == "4bet" and spot_type == "hero_opened_faces_3bet":
         chart = RANGECONVERTER_VS_3BET.get((hero_pos, situation.get("threebettor_pos")), {})
         return float(chart.get("fourbet_to_bb") or 23.0) * big_blind
-    if action == "4bet" and _effective_stack_bb(state) < 40:
-        return int(state.get("your_bet_this_street", 0)) + int(state.get("your_stack", 0))
     if action == "4bet":
         multiplier = SIZING_RULES["ip_4bet_multiplier"] if hero_pos in {"HJ", "CO", "BTN"} else SIZING_RULES["oop_4bet_multiplier"]
         return current_bet * multiplier
