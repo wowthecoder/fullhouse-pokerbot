@@ -15,6 +15,7 @@ import asyncio
 import importlib.util
 import json
 import os
+import time
 import uuid
 import websockets
 from dotenv import load_dotenv
@@ -22,11 +23,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from engine.openpoker_metrics import OpenPokerMetricsTracker
+
 
 ROOT = Path(__file__).resolve().parent
-FULLHOUSE_BOT_PATH = ROOT / "bots" / "my_bots" / "complete_v1.py"
+FULLHOUSE_BOT_PATH = ROOT / "bots" / "my_bots" / "complete_v3.py"
 DEFAULT_WS_URL = "wss://openpoker.ai/ws"
 DEFAULT_BUY_IN = 2000.0
+DEFAULT_METRICS_FILE = ROOT / "openpoker_metrics.json"
 load_dotenv()
 
 def load_fullhouse_bot(path: Path):
@@ -329,10 +333,28 @@ async def send_action(ws, turn_msg: dict[str, Any], action: dict[str, Any]) -> N
     await ws.send(json.dumps(payload))
 
 
-async def connect(api_key: str, ws_url: str, buy_in: float, once: bool = False) -> None:
+async def leave_table_and_rejoin_lobby(ws, buy_in: float) -> None:
+    await ws.send(json.dumps({"type": "leave_table"}))
+    await ws.send(json.dumps({"type": "join_lobby", "buy_in": buy_in}))
+
+
+async def connect(
+    api_key: str,
+    ws_url: str,
+    buy_in: float,
+    once: bool = False,
+    metrics_file: str | Path = DEFAULT_METRICS_FILE,
+) -> None:
     bot = load_fullhouse_bot(FULLHOUSE_BOT_PATH)
     state = OpenPokerState()
+    metrics = OpenPokerMetricsTracker(
+        metrics_file,
+        ws_url=ws_url,
+        buy_in=buy_in,
+        bot_path=FULLHOUSE_BOT_PATH,
+    )
     headers = {"Authorization": f"Bearer {api_key.strip()}"}
+    rebuy_pending = False
 
     async with websockets.connect(ws_url, additional_headers=headers) as ws:
         await ws.send(json.dumps({"type": "join_lobby", "buy_in": buy_in}))
@@ -346,27 +368,39 @@ async def connect(api_key: str, ws_url: str, buy_in: float, once: bool = False) 
 
             if msg_type == "connected":
                 state.agent_name = msg.get("name")
+                metrics.on_connected(msg)
                 print(f"Connected as {state.agent_name}")
             elif msg_type == "lobby_joined":
+                rebuy_pending = False
                 print(f"Joined lobby; position {msg.get('position')}")
             elif msg_type == "table_joined":
+                rebuy_pending = False
                 state.table_id = msg.get("table_id")
                 state.hero_seat = int(msg.get("seat", 0))
                 state.set_players(msg.get("players") or [])
+                metrics.on_table_joined(msg)
                 print(f"Seated at table {state.table_id}, seat {state.hero_seat}")
             elif msg_type == "hand_start":
+                rebuy_pending = False
                 state.start_hand(msg)
+                metrics.on_hand_start(msg, state.players)
                 print(f"Hand {state.hand_id} started")
             elif msg_type == "hole_cards":
                 state.set_hole_cards(msg.get("cards") or [])
+                metrics.on_hole_cards(msg)
             elif msg_type == "community_cards":
                 state.set_community_cards(msg)
+                metrics.on_community_cards(msg)
             elif msg_type == "player_action":
                 state.record_player_action(msg)
+                metrics.on_player_action(msg)
             elif msg_type == "your_turn":
                 fullhouse_state = state.fullhouse_state(msg)
+                started = time.perf_counter()
                 raw_decision = bot.decide(fullhouse_state)
+                latency_ms = (time.perf_counter() - started) * 1000
                 decision = clamp_openpoker_action(raw_decision, msg)
+                metrics.on_hero_decision(fullhouse_state, raw_decision, decision, msg, latency_ms)
                 await send_action(ws, msg, decision)
                 print(f"{fullhouse_state['street']}: {raw_decision} -> {decision}")
             elif msg_type == "action_ack":
@@ -374,16 +408,23 @@ async def connect(api_key: str, ws_url: str, buy_in: float, once: bool = False) 
             elif msg_type == "action_rejected":
                 print(f"Action rejected: {msg.get('reason')} {msg.get('details') or ''}")
             elif msg_type == "hand_result":
+                metrics.on_hand_result(msg)
                 print(f"Hand result: pot {msg.get('pot')}, winners {msg.get('winners')}")
                 if once:
                     await ws.send(json.dumps({"type": "leave_table"}))
                     return
             elif msg_type == "busted":
                 await ws.send(json.dumps({"type": "rebuy", "amount": 1500}))
+                rebuy_pending = True
             elif msg_type in {"table_closed", "season_ended"}:
+                rebuy_pending = False
                 await ws.send(json.dumps({"type": "join_lobby", "buy_in": buy_in}))
             elif msg_type == "error":
                 print(f"Open Poker error: {msg}")
+                if rebuy_pending:
+                    rebuy_pending = False
+                    print("Rebuy failed; leaving table and rejoining lobby.")
+                    await leave_table_and_rejoin_lobby(ws, buy_in)
             else:
                 print(f"Received: {msg_type}")
 
@@ -393,6 +434,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--api-key", default=os.environ.get("OPENPOKER_API_KEY"), help="Open Poker API key")
     parser.add_argument("--ws-url", default=os.environ.get("OPENPOKER_WS_URL", DEFAULT_WS_URL))
     parser.add_argument("--buy-in", type=float, default=float(os.environ.get("OPENPOKER_BUY_IN", DEFAULT_BUY_IN)))
+    parser.add_argument(
+        "--metrics-file",
+        default=os.environ.get("OPENPOKER_METRICS_FILE", str(DEFAULT_METRICS_FILE)),
+        help="Path to the continuously updated OpenPoker metrics JSON snapshot",
+    )
     parser.add_argument("--once", action="store_true", help="Leave after one completed hand")
     return parser.parse_args()
 
@@ -400,4 +446,4 @@ if __name__ == "__main__":
     args = parse_args()
     if not args.api_key:
         raise SystemExit("Set OPENPOKER_API_KEY or pass --api-key.")
-    asyncio.run(connect(args.api_key, args.ws_url, args.buy_in, once=args.once))
+    asyncio.run(connect(args.api_key, args.ws_url, args.buy_in, once=args.once, metrics_file=args.metrics_file))

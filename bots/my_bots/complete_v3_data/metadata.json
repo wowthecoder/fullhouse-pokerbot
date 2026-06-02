@@ -1,0 +1,98 @@
+{
+  "class_realization": {
+    "air": 0.8,
+    "combo_draw": 1.03,
+    "gutshot": 0.88,
+    "middle_pair": 0.88,
+    "non_nut_flush_draw": 0.96,
+    "nut_flush_draw": 1.01,
+    "oesd": 0.95,
+    "overpair": 0.98,
+    "top_pair_top_kicker": 0.96,
+    "top_pair_weak_kicker": 0.91,
+    "two_pair_plus": 1.04,
+    "underpair": 0.82
+  },
+  "flop_samples": 80,
+  "generated_at": "2026-06-02T04:14:41.252843+00:00",
+  "hero_classes": [
+    "overpair",
+    "top_pair_top_kicker",
+    "top_pair_weak_kicker",
+    "middle_pair",
+    "underpair",
+    "two_pair_plus",
+    "nut_flush_draw",
+    "non_nut_flush_draw",
+    "oesd",
+    "gutshot",
+    "combo_draw",
+    "air"
+  ],
+  "multiway_samples": 900,
+  "preflop_equity_sha256": "93fff45694d22f5950085cdddd5bd8297b72b9dbc31cdcbc61d3283d4a3f2e32",
+  "preflop_equity_source": "/home/wowthecoder/fullhouse-pokerbot/bots/my_bots/g5_data/preflop_equity_u8.bin",
+  "ranges": {
+    "fourbet_5": {
+      "kind": "top_pct",
+      "pct": 0.05
+    },
+    "open_20": {
+      "kind": "top_pct",
+      "pct": 0.2
+    },
+    "open_30": {
+      "kind": "top_pct",
+      "pct": 0.3
+    },
+    "premium_aa_kk": {
+      "classes": [
+        "AA",
+        "KK"
+      ],
+      "kind": "classes"
+    },
+    "premium_aa_kk_qq_ak": {
+      "classes": [
+        "AA",
+        "KK",
+        "QQ",
+        "AKs",
+        "AKo"
+      ],
+      "kind": "classes"
+    },
+    "random": {
+      "kind": "top_pct",
+      "pct": 1.0
+    },
+    "steal_45": {
+      "kind": "top_pct",
+      "pct": 0.45
+    },
+    "threebet_8": {
+      "kind": "top_pct",
+      "pct": 0.08
+    }
+  },
+  "river_only": false,
+  "river_policy_entries": 86400,
+  "role_realization": {
+    "BB_CALLER_OOP": 0.86,
+    "IP_CALLER": 0.98,
+    "IP_PFA": 1.02,
+    "OOP_CALLER": 0.88,
+    "OOP_PFA": 0.93
+  },
+  "roles": [
+    "IP_PFA",
+    "OOP_PFA",
+    "IP_CALLER",
+    "OOP_CALLER",
+    "BB_CALLER_OOP"
+  ],
+  "seed": 20260602,
+  "turn_cells": 51120,
+  "turn_only": true,
+  "turn_samples": 80
+}

@@ -1,0 +1,2002 @@
+{
+  "metrics": {
+    "Bet sizing metrics": {
+      "average_open_size_by_position": {},
+      "flop_bet_size_pct_pot": 0.469,
+      "four_bet_size_distribution": {
+        "average": null,
+        "count": 0,
+        "max": null,
+        "min": null
+      },
+      "min_click_raise_frequency": 0.0,
+      "overbet_frequency": 0.0,
+      "raise_fold_after_large_raise_count": 0,
+      "river_bet_size_pct_pot": null,
+      "three_bet_size_ip": null,
+      "three_bet_size_oop": null,
+      "turn_bet_size_pct_pot": null
+    },
+    "Big pot / stack-off metrics": {
+      "all_in_frequency_by_street": {
+        "flop": 0.0,
+        "preflop": 0.0,
+        "river": 0.0,
+        "turn": 0.0
+      },
+      "committed_then_folded_count": 0,
+      "large_pot_loss_by_street_of_final_investment": {},
+      "largest_10_losses": [
+        -20.0,
+        -20.0,
+        -20.0,
+        -10.0,
+        -10.0,
+        -10.0
+      ],
+      "largest_10_wins": [
+        56.0,
+        50.0,
+        20.0,
+        20.0
+      ],
+      "net_result_all_in_pots": null,
+      "net_result_pots_gt_100bb": null,
+      "net_result_pots_gt_50bb": null
+    },
+    "Core performance metrics": {
+      "bb_per_100": 28.0,
+      "bb_per_100_ci_high": 118.188,
+      "bb_per_100_ci_low": -62.188,
+      "chip_delta": 56.0,
+      "ev_per_hand": 5.6,
+      "hands": 10,
+      "hands_with_known_delta": 10
+    },
+    "Engineering reliability metrics": {
+      "average_latency_ms": 0.133,
+      "bet_above_max_or_stack_attempts": 0,
+      "bet_below_min_attempts": 0,
+      "decision_count": 12,
+      "latency_by_branch": {
+        "all_in_available": {
+          "average_ms": 0.133,
+          "count": 12,
+          "max_ms": 0.409,
+          "p95_ms": 0.358,
+          "p99_ms": 0.399
+        },
+        "can_check": {
+          "average_ms": 0.223,
+          "count": 4,
+          "max_ms": 0.409,
+          "p95_ms": 0.395,
+          "p99_ms": 0.406
+        },
+        "facing_call": {
+          "average_ms": 0.088,
+          "count": 8,
+          "max_ms": 0.14,
+          "p95_ms": 0.129,
+          "p99_ms": 0.138
+        },
+        "flop": {
+          "average_ms": 0.363,
+          "count": 2,
+          "max_ms": 0.409,
+          "p95_ms": 0.404,
+          "p99_ms": 0.408
+        },
+        "preflop": {
+          "average_ms": 0.087,
+          "count": 10,
+          "max_ms": 0.14,
+          "p95_ms": 0.126,
+          "p99_ms": 0.137
+        },
+        "raise_available": {
+          "average_ms": 0.133,
+          "count": 12,
+          "max_ms": 0.409,
+          "p95_ms": 0.358,
+          "p99_ms": 0.399
+        }
+      },
+      "latency_by_street": {
+        "flop": {
+          "average_ms": 0.363,
+          "count": 2,
+          "max_ms": 0.409,
+          "p95_ms": 0.404,
+          "p99_ms": 0.408
+        },
+        "preflop": {
+          "average_ms": 0.087,
+          "count": 10,
+          "max_ms": 0.14,
+          "p95_ms": 0.126,
+          "p99_ms": 0.137
+        }
+      },
+      "max_latency_ms": 0.409,
+      "p95_latency_ms": 0.358,
+      "p99_latency_ms": 0.399,
+      "raw_action_changed_count": 0
+    },
+    "Position metrics": {
+      "blind_loss_rate": 76.0,
+      "button_win_rate": -20.0,
+      "by_position": {
+        "BB": {
+          "bb_per_100": 76.0,
+          "chip_delta": 76.0,
+          "hands": 5,
+          "pfr": 0.0,
+          "vpip": 0.0
+        },
+        "BTN": {
+          "bb_per_100": -20.0,
+          "chip_delta": -20.0,
+          "hands": 5,
+          "pfr": 0.0,
+          "vpip": 0.0
+        }
+      }
+    },
+    "Postflop aggression metrics": {
+      "aggression_factor": null,
+      "aggression_frequency": 66.667,
+      "continuation_bet_flop": null,
+      "continuation_bet_river": null,
+      "continuation_bet_turn": null,
+      "fold_to_continuation_bet": null
+    },
+    "Pot odds / call quality metrics": {
+      "average_pot_odds_faced_when_calling": null,
+      "average_pot_odds_faced_when_folding": 0.323,
+      "average_required_equity_on_call": null,
+      "river_call_win_rate": null
+    },
+    "Preflop style metrics": {
+      "fold_bb_to_steal": null,
+      "fold_to_three_bet": null,
+      "limp": 0.0,
+      "open_raise_by_position": {
+        "BB": 0.0,
+        "BTN": 0.0
+      },
+      "pfr": 0.0,
+      "pfr_by_position": {
+        "BB": 0.0,
+        "BTN": 0.0
+      },
+      "steal_attempt": null,
+      "three_bet": 0.0,
+      "vpip": 0.0,
+      "vpip_by_position": {
+        "BB": 0.0,
+        "BTN": 0.0
+      }
+    },
+    "Showdown and hand-quality metrics": {
+      "non_showdown_winnings": null,
+      "showdown_win_rate": null,
+      "showdown_winnings": null,
+      "wonsd": null,
+      "wtsd": 0.0
+    },
+    "Street by street EV": {
+      "ev_after_seeing_flop": 20.0,
+      "ev_as_preflop_aggressor": null,
+      "ev_as_preflop_caller": null,
+      "ev_in_four_bet_pots": null,
+      "ev_in_single_raised_pots": -20.0,
+      "ev_in_three_bet_pots": null,
+      "flop_ev": 20.0,
+      "preflop_ev": 2.0,
+      "river_ev": null,
+      "turn_ev": null
+    }
+  },
+  "notes": [
+    "Reliable-only OpenPoker metrics: hidden-card equity, true bluff frequency, estimated-equity call quality, hero-call efficiency, and stack-off hand class are omitted unless OpenPoker exposes enough data in future payloads."
+  ],
+  "recent_hands": [
+    {
+      "actions": [
+        {
+          "action": "small_blind",
+          "amount": 10.0,
+          "bot_id": "Nemesis",
+          "contribution": 10.0,
+          "from_hero_decision": false,
+          "position": "BTN",
+          "pot": 10.0,
+          "seat": 0,
+          "street": "preflop"
+        },
+        {
+          "action": "big_blind",
+          "amount": 20.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 20.0,
+          "from_hero_decision": false,
+          "position": "BB",
+          "pot": 30.0,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "amount_owed": 10.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": true,
+          "position": "BB",
+          "pot": 30.0,
+          "required_equity": 0.25,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": false,
+          "position": "BB",
+          "pot": 30.0,
+          "seat": 1,
+          "street": "preflop"
+        }
+      ],
+      "big_blind": 20.0,
+      "community_cards": [],
+      "delta": -10.0,
+      "ending_street": "preflop",
+      "hand_id": "130ced11-a75e-468e-a3d3-3d762b0d870f",
+      "hero_actions": [
+        {
+          "action": "big_blind",
+          "amount": 20.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 20.0,
+          "from_hero_decision": false,
+          "position": "BB",
+          "pot": 30.0,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "amount_owed": 10.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": true,
+          "position": "BB",
+          "pot": 30.0,
+          "required_equity": 0.25,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": false,
+          "position": "BB",
+          "pot": 30.0,
+          "seat": 1,
+          "street": "preflop"
+        }
+      ],
+      "hero_decisions": [
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "amount_owed": 10.0,
+          "bet_above_max_or_stack_attempt": false,
+          "bet_below_min_attempt": false,
+          "bot_id": "PokeyDokey",
+          "branches": [
+            "preflop",
+            "facing_call",
+            "raise_available",
+            "all_in_available"
+          ],
+          "community_cards": [],
+          "hole_cards": [
+            "Ks",
+            "4h"
+          ],
+          "latency_ms": 0.086,
+          "position": "BB",
+          "pot": 30.0,
+          "raw_action": "fold",
+          "raw_action_changed": false,
+          "raw_amount": null,
+          "required_equity": 0.25,
+          "seat": 1,
+          "stack": 1990.0,
+          "street": "preflop",
+          "valid_actions": [
+            "all_in",
+            "call",
+            "fold",
+            "raise"
+          ]
+        }
+      ],
+      "hero_position": "BB",
+      "hero_seat": 1,
+      "hero_total_invested": 20.0,
+      "hole_cards": [
+        "Ks",
+        "4h"
+      ],
+      "positions": {
+        "0": "BTN",
+        "1": "BB"
+      },
+      "pot": 10.0,
+      "showdown": null,
+      "table_id": "4ac3d16d-2aee-4d89-b810-217dc3afe930",
+      "winners": [
+        {
+          "amount": 10,
+          "hand_description": null,
+          "name": "Nemesis",
+          "seat": 0,
+          "stack": 2010
+        }
+      ]
+    },
+    {
+      "actions": [
+        {
+          "action": "small_blind",
+          "amount": 10.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 10.0,
+          "from_hero_decision": false,
+          "position": "BTN",
+          "pot": 10.0,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "big_blind",
+          "amount": 20.0,
+          "bot_id": "Nemesis",
+          "contribution": 20.0,
+          "from_hero_decision": false,
+          "position": "BB",
+          "pot": 30.0,
+          "seat": 0,
+          "street": "preflop"
+        },
+        {
+          "action": "raise",
+          "amount": 175.0,
+          "bot_id": "Nemesis",
+          "contribution": 165.0,
+          "from_hero_decision": false,
+          "position": "BB",
+          "pot": 195.0,
+          "seat": 0,
+          "street": "preflop"
+        },
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "amount_owed": 155.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": true,
+          "position": "BTN",
+          "pot": 195.0,
+          "required_equity": 0.44285714285714284,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": false,
+          "position": "BTN",
+          "pot": 195.0,
+          "seat": 1,
+          "street": "preflop"
+        }
+      ],
+      "big_blind": 20.0,
+      "community_cards": [],
+      "delta": -20.0,
+      "ending_street": "preflop",
+      "hand_id": "4a14a85d-9d08-412d-8724-daa91d2cc4c9",
+      "hero_actions": [
+        {
+          "action": "small_blind",
+          "amount": 10.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 10.0,
+          "from_hero_decision": false,
+          "position": "BTN",
+          "pot": 10.0,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "amount_owed": 155.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": true,
+          "position": "BTN",
+          "pot": 195.0,
+          "required_equity": 0.44285714285714284,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": false,
+          "position": "BTN",
+          "pot": 195.0,
+          "seat": 1,
+          "street": "preflop"
+        }
+      ],
+      "hero_decisions": [
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "amount_owed": 155.0,
+          "bet_above_max_or_stack_attempt": false,
+          "bet_below_min_attempt": false,
+          "bot_id": "PokeyDokey",
+          "branches": [
+            "preflop",
+            "facing_call",
+            "raise_available",
+            "all_in_available"
+          ],
+          "community_cards": [],
+          "hole_cards": [
+            "3c",
+            "4s"
+          ],
+          "latency_ms": 0.109,
+          "position": "BTN",
+          "pot": 195.0,
+          "raw_action": "fold",
+          "raw_action_changed": false,
+          "raw_amount": null,
+          "required_equity": 0.44285714285714284,
+          "seat": 1,
+          "stack": 1970.0,
+          "street": "preflop",
+          "valid_actions": [
+            "all_in",
+            "call",
+            "fold",
+            "raise"
+          ]
+        }
+      ],
+      "hero_position": "BTN",
+      "hero_seat": 1,
+      "hero_total_invested": 10.0,
+      "hole_cards": [
+        "3c",
+        "4s"
+      ],
+      "positions": {
+        "0": "BB",
+        "1": "BTN"
+      },
+      "pot": 20.0,
+      "showdown": null,
+      "table_id": "4ac3d16d-2aee-4d89-b810-217dc3afe930",
+      "winners": [
+        {
+          "amount": 20,
+          "hand_description": null,
+          "name": "Nemesis",
+          "seat": 0,
+          "stack": 2030
+        }
+      ]
+    },
+    {
+      "actions": [
+        {
+          "action": "small_blind",
+          "amount": 10.0,
+          "bot_id": "Nemesis",
+          "contribution": 10.0,
+          "from_hero_decision": false,
+          "position": "BTN",
+          "pot": 10.0,
+          "seat": 0,
+          "street": "preflop"
+        },
+        {
+          "action": "big_blind",
+          "amount": 20.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 20.0,
+          "from_hero_decision": false,
+          "position": "BB",
+          "pot": 30.0,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "amount_owed": 10.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": true,
+          "position": "BB",
+          "pot": 30.0,
+          "required_equity": 0.25,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": false,
+          "position": "BB",
+          "pot": 30.0,
+          "seat": 1,
+          "street": "preflop"
+        }
+      ],
+      "big_blind": 20.0,
+      "community_cards": [],
+      "delta": -10.0,
+      "ending_street": "preflop",
+      "hand_id": "10e512fd-3846-455b-85be-495eb73b266e",
+      "hero_actions": [
+        {
+          "action": "big_blind",
+          "amount": 20.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 20.0,
+          "from_hero_decision": false,
+          "position": "BB",
+          "pot": 30.0,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "amount_owed": 10.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": true,
+          "position": "BB",
+          "pot": 30.0,
+          "required_equity": 0.25,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": false,
+          "position": "BB",
+          "pot": 30.0,
+          "seat": 1,
+          "street": "preflop"
+        }
+      ],
+      "hero_decisions": [
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "amount_owed": 10.0,
+          "bet_above_max_or_stack_attempt": false,
+          "bet_below_min_attempt": false,
+          "bot_id": "PokeyDokey",
+          "branches": [
+            "preflop",
+            "facing_call",
+            "raise_available",
+            "all_in_available"
+          ],
+          "community_cards": [],
+          "hole_cards": [
+            "Js",
+            "3s"
+          ],
+          "latency_ms": 0.14,
+          "position": "BB",
+          "pot": 30.0,
+          "raw_action": "fold",
+          "raw_action_changed": false,
+          "raw_amount": null,
+          "required_equity": 0.25,
+          "seat": 1,
+          "stack": 1960.0,
+          "street": "preflop",
+          "valid_actions": [
+            "all_in",
+            "call",
+            "fold",
+            "raise"
+          ]
+        }
+      ],
+      "hero_position": "BB",
+      "hero_seat": 1,
+      "hero_total_invested": 20.0,
+      "hole_cards": [
+        "Js",
+        "3s"
+      ],
+      "positions": {
+        "0": "BTN",
+        "1": "BB"
+      },
+      "pot": 10.0,
+      "showdown": null,
+      "table_id": "4ac3d16d-2aee-4d89-b810-217dc3afe930",
+      "winners": [
+        {
+          "amount": 10,
+          "hand_description": null,
+          "name": "Nemesis",
+          "seat": 0,
+          "stack": 2040
+        }
+      ]
+    },
+    {
+      "actions": [
+        {
+          "action": "small_blind",
+          "amount": 10.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 10.0,
+          "from_hero_decision": false,
+          "position": "BTN",
+          "pot": 10.0,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "big_blind",
+          "amount": 20.0,
+          "bot_id": "Nemesis",
+          "contribution": 20.0,
+          "from_hero_decision": false,
+          "position": "BB",
+          "pot": 30.0,
+          "seat": 0,
+          "street": "preflop"
+        },
+        {
+          "action": "call",
+          "amount": 0.0,
+          "bot_id": "Nemesis",
+          "contribution": 10.0,
+          "from_hero_decision": false,
+          "position": "BB",
+          "pot": 40.0,
+          "seat": 0,
+          "street": "preflop"
+        },
+        {
+          "action": "check",
+          "amount": 0.0,
+          "amount_owed": 0.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": true,
+          "position": "BTN",
+          "pot": 40.0,
+          "required_equity": null,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "check",
+          "amount": 0.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": false,
+          "position": "BTN",
+          "pot": 40.0,
+          "seat": 1,
+          "street": "flop"
+        },
+        {
+          "action": "raise",
+          "amount": 20.0,
+          "amount_owed": 0.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 20.0,
+          "from_hero_decision": true,
+          "position": "BTN",
+          "pot": 40.0,
+          "required_equity": null,
+          "seat": 1,
+          "street": "flop"
+        },
+        {
+          "action": "raise",
+          "amount": 20.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 20.0,
+          "from_hero_decision": false,
+          "position": "BTN",
+          "pot": 60.0,
+          "seat": 1,
+          "street": "flop"
+        },
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "bot_id": "Nemesis",
+          "contribution": 0.0,
+          "from_hero_decision": false,
+          "position": "BB",
+          "pot": 60.0,
+          "seat": 0,
+          "street": "flop"
+        }
+      ],
+      "big_blind": 20.0,
+      "community_cards": [
+        "Th",
+        "5s",
+        "5c"
+      ],
+      "delta": 20.0,
+      "ending_street": "flop",
+      "hand_id": "25a1e330-a221-4a4e-b6f5-6b116657a8a9",
+      "hero_actions": [
+        {
+          "action": "small_blind",
+          "amount": 10.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 10.0,
+          "from_hero_decision": false,
+          "position": "BTN",
+          "pot": 10.0,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "check",
+          "amount": 0.0,
+          "amount_owed": 0.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": true,
+          "position": "BTN",
+          "pot": 40.0,
+          "required_equity": null,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "check",
+          "amount": 0.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": false,
+          "position": "BTN",
+          "pot": 40.0,
+          "seat": 1,
+          "street": "flop"
+        },
+        {
+          "action": "raise",
+          "amount": 20.0,
+          "amount_owed": 0.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 20.0,
+          "from_hero_decision": true,
+          "position": "BTN",
+          "pot": 40.0,
+          "required_equity": null,
+          "seat": 1,
+          "street": "flop"
+        },
+        {
+          "action": "raise",
+          "amount": 20.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 20.0,
+          "from_hero_decision": false,
+          "position": "BTN",
+          "pot": 60.0,
+          "seat": 1,
+          "street": "flop"
+        }
+      ],
+      "hero_decisions": [
+        {
+          "action": "check",
+          "amount": 0.0,
+          "amount_owed": 0.0,
+          "bet_above_max_or_stack_attempt": false,
+          "bet_below_min_attempt": false,
+          "bot_id": "PokeyDokey",
+          "branches": [
+            "preflop",
+            "can_check",
+            "raise_available",
+            "all_in_available"
+          ],
+          "community_cards": [],
+          "hole_cards": [
+            "3d",
+            "Jd"
+          ],
+          "latency_ms": 0.106,
+          "position": "BTN",
+          "pot": 40.0,
+          "raw_action": "check",
+          "raw_action_changed": false,
+          "raw_amount": null,
+          "required_equity": null,
+          "seat": 1,
+          "stack": 1940.0,
+          "street": "preflop",
+          "valid_actions": [
+            "all_in",
+            "check",
+            "fold",
+            "raise"
+          ]
+        },
+        {
+          "action": "raise",
+          "amount": 20.0,
+          "amount_owed": 0.0,
+          "bet_above_max_or_stack_attempt": false,
+          "bet_below_min_attempt": false,
+          "bot_id": "PokeyDokey",
+          "branches": [
+            "flop",
+            "can_check",
+            "raise_available",
+            "all_in_available"
+          ],
+          "community_cards": [
+            "Th",
+            "5s",
+            "5c"
+          ],
+          "hole_cards": [
+            "3d",
+            "Jd"
+          ],
+          "latency_ms": 0.409,
+          "position": "BTN",
+          "pot": 40.0,
+          "raw_action": "raise",
+          "raw_action_changed": false,
+          "raw_amount": 20.0,
+          "required_equity": null,
+          "seat": 1,
+          "stack": 1940.0,
+          "street": "flop",
+          "valid_actions": [
+            "all_in",
+            "check",
+            "fold",
+            "raise"
+          ]
+        }
+      ],
+      "hero_position": "BTN",
+      "hero_seat": 1,
+      "hero_total_invested": 50.0,
+      "hole_cards": [
+        "3d",
+        "Jd"
+      ],
+      "positions": {
+        "0": "BB",
+        "1": "BTN"
+      },
+      "pot": 20.0,
+      "showdown": null,
+      "table_id": "4ac3d16d-2aee-4d89-b810-217dc3afe930",
+      "winners": [
+        {
+          "amount": 20,
+          "hand_description": null,
+          "name": "PokeyDokey",
+          "seat": 1,
+          "stack": 1980
+        }
+      ]
+    },
+    {
+      "actions": [
+        {
+          "action": "small_blind",
+          "amount": 10.0,
+          "bot_id": "Nemesis",
+          "contribution": 10.0,
+          "from_hero_decision": false,
+          "position": "BTN",
+          "pot": 10.0,
+          "seat": 0,
+          "street": "preflop"
+        },
+        {
+          "action": "big_blind",
+          "amount": 20.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 20.0,
+          "from_hero_decision": false,
+          "position": "BB",
+          "pot": 30.0,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "amount_owed": 10.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": true,
+          "position": "BB",
+          "pot": 30.0,
+          "required_equity": 0.25,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": false,
+          "position": "BB",
+          "pot": 30.0,
+          "seat": 1,
+          "street": "preflop"
+        }
+      ],
+      "big_blind": 20.0,
+      "community_cards": [],
+      "delta": 50.0,
+      "ending_street": "preflop",
+      "hand_id": "58014dbf-b975-4f95-8ac2-601d5abf5706",
+      "hero_actions": [
+        {
+          "action": "big_blind",
+          "amount": 20.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 20.0,
+          "from_hero_decision": false,
+          "position": "BB",
+          "pot": 30.0,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "amount_owed": 10.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": true,
+          "position": "BB",
+          "pot": 30.0,
+          "required_equity": 0.25,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": false,
+          "position": "BB",
+          "pot": 30.0,
+          "seat": 1,
+          "street": "preflop"
+        }
+      ],
+      "hero_decisions": [
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "amount_owed": 10.0,
+          "bet_above_max_or_stack_attempt": false,
+          "bet_below_min_attempt": false,
+          "bot_id": "PokeyDokey",
+          "branches": [
+            "preflop",
+            "facing_call",
+            "raise_available",
+            "all_in_available"
+          ],
+          "community_cards": [],
+          "hole_cards": [
+            "5h",
+            "2s"
+          ],
+          "latency_ms": 0.059,
+          "position": "BB",
+          "pot": 30.0,
+          "raw_action": "fold",
+          "raw_action_changed": false,
+          "raw_amount": null,
+          "required_equity": 0.25,
+          "seat": 1,
+          "stack": 1970.0,
+          "street": "preflop",
+          "valid_actions": [
+            "all_in",
+            "call",
+            "fold",
+            "raise"
+          ]
+        }
+      ],
+      "hero_position": "BB",
+      "hero_seat": 1,
+      "hero_total_invested": 20.0,
+      "hole_cards": [
+        "5h",
+        "2s"
+      ],
+      "positions": {
+        "0": "BTN",
+        "1": "BB"
+      },
+      "pot": 10.0,
+      "showdown": null,
+      "table_id": "4ac3d16d-2aee-4d89-b810-217dc3afe930",
+      "winners": [
+        {
+          "amount": 10,
+          "hand_description": null,
+          "name": "Nemesis",
+          "seat": 0,
+          "stack": 2030
+        }
+      ]
+    },
+    {
+      "actions": [
+        {
+          "action": "small_blind",
+          "amount": 10.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 10.0,
+          "from_hero_decision": false,
+          "position": "BTN",
+          "pot": 10.0,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "big_blind",
+          "amount": 20.0,
+          "bot_id": "Nemesis",
+          "contribution": 20.0,
+          "from_hero_decision": false,
+          "position": "BB",
+          "pot": 30.0,
+          "seat": 0,
+          "street": "preflop"
+        },
+        {
+          "action": "raise",
+          "amount": 176.0,
+          "bot_id": "Nemesis",
+          "contribution": 166.0,
+          "from_hero_decision": false,
+          "position": "BB",
+          "pot": 196.0,
+          "seat": 0,
+          "street": "preflop"
+        },
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "amount_owed": 156.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": true,
+          "position": "BTN",
+          "pot": 196.0,
+          "required_equity": 0.4431818181818182,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": false,
+          "position": "BTN",
+          "pot": 196.0,
+          "seat": 1,
+          "street": "preflop"
+        }
+      ],
+      "big_blind": 20.0,
+      "community_cards": [],
+      "delta": -20.0,
+      "ending_street": "preflop",
+      "hand_id": "06fb2cc3-fe06-496d-830a-0bb0f34710b9",
+      "hero_actions": [
+        {
+          "action": "small_blind",
+          "amount": 10.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 10.0,
+          "from_hero_decision": false,
+          "position": "BTN",
+          "pot": 10.0,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "amount_owed": 156.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": true,
+          "position": "BTN",
+          "pot": 196.0,
+          "required_equity": 0.4431818181818182,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": false,
+          "position": "BTN",
+          "pot": 196.0,
+          "seat": 1,
+          "street": "preflop"
+        }
+      ],
+      "hero_decisions": [
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "amount_owed": 156.0,
+          "bet_above_max_or_stack_attempt": false,
+          "bet_below_min_attempt": false,
+          "bot_id": "PokeyDokey",
+          "branches": [
+            "preflop",
+            "facing_call",
+            "raise_available",
+            "all_in_available"
+          ],
+          "community_cards": [],
+          "hole_cards": [
+            "Kh",
+            "9c"
+          ],
+          "latency_ms": 0.096,
+          "position": "BTN",
+          "pot": 196.0,
+          "raw_action": "fold",
+          "raw_action_changed": false,
+          "raw_amount": null,
+          "required_equity": 0.4431818181818182,
+          "seat": 1,
+          "stack": 1950.0,
+          "street": "preflop",
+          "valid_actions": [
+            "all_in",
+            "call",
+            "fold",
+            "raise"
+          ]
+        }
+      ],
+      "hero_position": "BTN",
+      "hero_seat": 1,
+      "hero_total_invested": 10.0,
+      "hole_cards": [
+        "Kh",
+        "9c"
+      ],
+      "positions": {
+        "0": "BB",
+        "1": "BTN"
+      },
+      "pot": 20.0,
+      "showdown": null,
+      "table_id": "4ac3d16d-2aee-4d89-b810-217dc3afe930",
+      "winners": [
+        {
+          "amount": 20,
+          "hand_description": null,
+          "name": "Nemesis",
+          "seat": 0,
+          "stack": 2050
+        }
+      ]
+    },
+    {
+      "actions": [
+        {
+          "action": "small_blind",
+          "amount": 10.0,
+          "bot_id": "Nemesis",
+          "contribution": 10.0,
+          "from_hero_decision": false,
+          "position": "BTN",
+          "pot": 10.0,
+          "seat": 0,
+          "street": "preflop"
+        },
+        {
+          "action": "big_blind",
+          "amount": 20.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 20.0,
+          "from_hero_decision": false,
+          "position": "BB",
+          "pot": 30.0,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "amount_owed": 10.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": true,
+          "position": "BB",
+          "pot": 30.0,
+          "required_equity": 0.25,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": false,
+          "position": "BB",
+          "pot": 30.0,
+          "seat": 1,
+          "street": "preflop"
+        }
+      ],
+      "big_blind": 20.0,
+      "community_cards": [],
+      "delta": -10.0,
+      "ending_street": "preflop",
+      "hand_id": "16ea1aaf-c0e3-4200-9f36-023eff78b151",
+      "hero_actions": [
+        {
+          "action": "big_blind",
+          "amount": 20.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 20.0,
+          "from_hero_decision": false,
+          "position": "BB",
+          "pot": 30.0,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "amount_owed": 10.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": true,
+          "position": "BB",
+          "pot": 30.0,
+          "required_equity": 0.25,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": false,
+          "position": "BB",
+          "pot": 30.0,
+          "seat": 1,
+          "street": "preflop"
+        }
+      ],
+      "hero_decisions": [
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "amount_owed": 10.0,
+          "bet_above_max_or_stack_attempt": false,
+          "bet_below_min_attempt": false,
+          "bot_id": "PokeyDokey",
+          "branches": [
+            "preflop",
+            "facing_call",
+            "raise_available",
+            "all_in_available"
+          ],
+          "community_cards": [],
+          "hole_cards": [
+            "Ks",
+            "4c"
+          ],
+          "latency_ms": 0.063,
+          "position": "BB",
+          "pot": 30.0,
+          "raw_action": "fold",
+          "raw_action_changed": false,
+          "raw_amount": null,
+          "required_equity": 0.25,
+          "seat": 1,
+          "stack": 1940.0,
+          "street": "preflop",
+          "valid_actions": [
+            "all_in",
+            "call",
+            "fold",
+            "raise"
+          ]
+        }
+      ],
+      "hero_position": "BB",
+      "hero_seat": 1,
+      "hero_total_invested": 20.0,
+      "hole_cards": [
+        "Ks",
+        "4c"
+      ],
+      "positions": {
+        "0": "BTN",
+        "1": "BB"
+      },
+      "pot": 10.0,
+      "showdown": null,
+      "table_id": "4ac3d16d-2aee-4d89-b810-217dc3afe930",
+      "winners": [
+        {
+          "amount": 10,
+          "hand_description": null,
+          "name": "Nemesis",
+          "seat": 0,
+          "stack": 2060
+        }
+      ]
+    },
+    {
+      "actions": [
+        {
+          "action": "small_blind",
+          "amount": 10.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 10.0,
+          "from_hero_decision": false,
+          "position": "BTN",
+          "pot": 10.0,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "big_blind",
+          "amount": 20.0,
+          "bot_id": "Nemesis",
+          "contribution": 20.0,
+          "from_hero_decision": false,
+          "position": "BB",
+          "pot": 30.0,
+          "seat": 0,
+          "street": "preflop"
+        },
+        {
+          "action": "call",
+          "amount": 0.0,
+          "bot_id": "Nemesis",
+          "contribution": 10.0,
+          "from_hero_decision": false,
+          "position": "BB",
+          "pot": 40.0,
+          "seat": 0,
+          "street": "preflop"
+        },
+        {
+          "action": "check",
+          "amount": 0.0,
+          "amount_owed": 0.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": true,
+          "position": "BTN",
+          "pot": 40.0,
+          "required_equity": null,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "check",
+          "amount": 0.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": false,
+          "position": "BTN",
+          "pot": 40.0,
+          "seat": 1,
+          "street": "flop"
+        },
+        {
+          "action": "raise",
+          "amount": 26.0,
+          "amount_owed": 0.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 26.0,
+          "from_hero_decision": true,
+          "position": "BTN",
+          "pot": 40.0,
+          "required_equity": null,
+          "seat": 1,
+          "street": "flop"
+        },
+        {
+          "action": "raise",
+          "amount": 26.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 26.0,
+          "from_hero_decision": false,
+          "position": "BTN",
+          "pot": 66.0,
+          "seat": 1,
+          "street": "flop"
+        },
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "bot_id": "Nemesis",
+          "contribution": 0.0,
+          "from_hero_decision": false,
+          "position": "BB",
+          "pot": 66.0,
+          "seat": 0,
+          "street": "flop"
+        }
+      ],
+      "big_blind": 20.0,
+      "community_cards": [
+        "2c",
+        "3h",
+        "Kc"
+      ],
+      "delta": 20.0,
+      "ending_street": "flop",
+      "hand_id": "bde4f354-9c15-48c5-922b-3a1e54cfa5c6",
+      "hero_actions": [
+        {
+          "action": "small_blind",
+          "amount": 10.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 10.0,
+          "from_hero_decision": false,
+          "position": "BTN",
+          "pot": 10.0,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "check",
+          "amount": 0.0,
+          "amount_owed": 0.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": true,
+          "position": "BTN",
+          "pot": 40.0,
+          "required_equity": null,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "check",
+          "amount": 0.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": false,
+          "position": "BTN",
+          "pot": 40.0,
+          "seat": 1,
+          "street": "flop"
+        },
+        {
+          "action": "raise",
+          "amount": 26.0,
+          "amount_owed": 0.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 26.0,
+          "from_hero_decision": true,
+          "position": "BTN",
+          "pot": 40.0,
+          "required_equity": null,
+          "seat": 1,
+          "street": "flop"
+        },
+        {
+          "action": "raise",
+          "amount": 26.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 26.0,
+          "from_hero_decision": false,
+          "position": "BTN",
+          "pot": 66.0,
+          "seat": 1,
+          "street": "flop"
+        }
+      ],
+      "hero_decisions": [
+        {
+          "action": "check",
+          "amount": 0.0,
+          "amount_owed": 0.0,
+          "bet_above_max_or_stack_attempt": false,
+          "bet_below_min_attempt": false,
+          "bot_id": "PokeyDokey",
+          "branches": [
+            "preflop",
+            "can_check",
+            "raise_available",
+            "all_in_available"
+          ],
+          "community_cards": [],
+          "hole_cards": [
+            "4h",
+            "Ah"
+          ],
+          "latency_ms": 0.061,
+          "position": "BTN",
+          "pot": 40.0,
+          "raw_action": "check",
+          "raw_action_changed": false,
+          "raw_amount": null,
+          "required_equity": null,
+          "seat": 1,
+          "stack": 1920.0,
+          "street": "preflop",
+          "valid_actions": [
+            "all_in",
+            "check",
+            "fold",
+            "raise"
+          ]
+        },
+        {
+          "action": "raise",
+          "amount": 26.0,
+          "amount_owed": 0.0,
+          "bet_above_max_or_stack_attempt": false,
+          "bet_below_min_attempt": false,
+          "bot_id": "PokeyDokey",
+          "branches": [
+            "flop",
+            "can_check",
+            "raise_available",
+            "all_in_available"
+          ],
+          "community_cards": [
+            "2c",
+            "3h",
+            "Kc"
+          ],
+          "hole_cards": [
+            "4h",
+            "Ah"
+          ],
+          "latency_ms": 0.317,
+          "position": "BTN",
+          "pot": 40.0,
+          "raw_action": "raise",
+          "raw_action_changed": false,
+          "raw_amount": 26.0,
+          "required_equity": null,
+          "seat": 1,
+          "stack": 1920.0,
+          "street": "flop",
+          "valid_actions": [
+            "all_in",
+            "check",
+            "fold",
+            "raise"
+          ]
+        }
+      ],
+      "hero_position": "BTN",
+      "hero_seat": 1,
+      "hero_total_invested": 62.0,
+      "hole_cards": [
+        "4h",
+        "Ah"
+      ],
+      "positions": {
+        "0": "BB",
+        "1": "BTN"
+      },
+      "pot": 20.0,
+      "showdown": null,
+      "table_id": "4ac3d16d-2aee-4d89-b810-217dc3afe930",
+      "winners": [
+        {
+          "amount": 20,
+          "hand_description": null,
+          "name": "PokeyDokey",
+          "seat": 1,
+          "stack": 1960
+        }
+      ]
+    },
+    {
+      "actions": [
+        {
+          "action": "small_blind",
+          "amount": 10.0,
+          "bot_id": "Nemesis",
+          "contribution": 10.0,
+          "from_hero_decision": false,
+          "position": "BTN",
+          "pot": 10.0,
+          "seat": 0,
+          "street": "preflop"
+        },
+        {
+          "action": "big_blind",
+          "amount": 20.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 20.0,
+          "from_hero_decision": false,
+          "position": "BB",
+          "pot": 30.0,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "amount_owed": 10.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": true,
+          "position": "BB",
+          "pot": 30.0,
+          "required_equity": 0.25,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": false,
+          "position": "BB",
+          "pot": 30.0,
+          "seat": 1,
+          "street": "preflop"
+        }
+      ],
+      "big_blind": 20.0,
+      "community_cards": [],
+      "delta": 56.0,
+      "ending_street": "preflop",
+      "hand_id": "cb7c8f27-aede-4d59-aabc-3af9741b9e7f",
+      "hero_actions": [
+        {
+          "action": "big_blind",
+          "amount": 20.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 20.0,
+          "from_hero_decision": false,
+          "position": "BB",
+          "pot": 30.0,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "amount_owed": 10.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": true,
+          "position": "BB",
+          "pot": 30.0,
+          "required_equity": 0.25,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": false,
+          "position": "BB",
+          "pot": 30.0,
+          "seat": 1,
+          "street": "preflop"
+        }
+      ],
+      "hero_decisions": [
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "amount_owed": 10.0,
+          "bet_above_max_or_stack_attempt": false,
+          "bet_below_min_attempt": false,
+          "bot_id": "PokeyDokey",
+          "branches": [
+            "preflop",
+            "facing_call",
+            "raise_available",
+            "all_in_available"
+          ],
+          "community_cards": [],
+          "hole_cards": [
+            "5c",
+            "Qh"
+          ],
+          "latency_ms": 0.06,
+          "position": "BB",
+          "pot": 30.0,
+          "raw_action": "fold",
+          "raw_action_changed": false,
+          "raw_amount": null,
+          "required_equity": 0.25,
+          "seat": 1,
+          "stack": 1950.0,
+          "street": "preflop",
+          "valid_actions": [
+            "all_in",
+            "call",
+            "fold",
+            "raise"
+          ]
+        }
+      ],
+      "hero_position": "BB",
+      "hero_seat": 1,
+      "hero_total_invested": 20.0,
+      "hole_cards": [
+        "5c",
+        "Qh"
+      ],
+      "positions": {
+        "0": "BTN",
+        "1": "BB"
+      },
+      "pot": 10.0,
+      "showdown": null,
+      "table_id": "4ac3d16d-2aee-4d89-b810-217dc3afe930",
+      "winners": [
+        {
+          "amount": 10,
+          "hand_description": null,
+          "name": "Nemesis",
+          "seat": 0,
+          "stack": 2050
+        }
+      ]
+    },
+    {
+      "actions": [
+        {
+          "action": "small_blind",
+          "amount": 10.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 10.0,
+          "from_hero_decision": false,
+          "position": "BTN",
+          "pot": 10.0,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "big_blind",
+          "amount": 20.0,
+          "bot_id": "Nemesis",
+          "contribution": 20.0,
+          "from_hero_decision": false,
+          "position": "BB",
+          "pot": 30.0,
+          "seat": 0,
+          "street": "preflop"
+        },
+        {
+          "action": "raise",
+          "amount": 186.0,
+          "bot_id": "Nemesis",
+          "contribution": 176.0,
+          "from_hero_decision": false,
+          "position": "BB",
+          "pot": 206.0,
+          "seat": 0,
+          "street": "preflop"
+        },
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "amount_owed": 166.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": true,
+          "position": "BTN",
+          "pot": 206.0,
+          "required_equity": 0.44623655913978494,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": false,
+          "position": "BTN",
+          "pot": 206.0,
+          "seat": 1,
+          "street": "preflop"
+        }
+      ],
+      "big_blind": 20.0,
+      "community_cards": [],
+      "delta": -20.0,
+      "ending_street": "preflop",
+      "hand_id": "43da926d-72a4-4e17-ba1b-afd75cea051e",
+      "hero_actions": [
+        {
+          "action": "small_blind",
+          "amount": 10.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 10.0,
+          "from_hero_decision": false,
+          "position": "BTN",
+          "pot": 10.0,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "amount_owed": 166.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": true,
+          "position": "BTN",
+          "pot": 206.0,
+          "required_equity": 0.44623655913978494,
+          "seat": 1,
+          "street": "preflop"
+        },
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "bot_id": "PokeyDokey",
+          "contribution": 0.0,
+          "from_hero_decision": false,
+          "position": "BTN",
+          "pot": 206.0,
+          "seat": 1,
+          "street": "preflop"
+        }
+      ],
+      "hero_decisions": [
+        {
+          "action": "fold",
+          "amount": 0.0,
+          "amount_owed": 166.0,
+          "bet_above_max_or_stack_attempt": false,
+          "bet_below_min_attempt": false,
+          "bot_id": "PokeyDokey",
+          "branches": [
+            "preflop",
+            "facing_call",
+            "raise_available",
+            "all_in_available"
+          ],
+          "community_cards": [],
+          "hole_cards": [
+            "Ts",
+            "6s"
+          ],
+          "latency_ms": 0.095,
+          "position": "BTN",
+          "pot": 206.0,
+          "raw_action": "fold",
+          "raw_action_changed": false,
+          "raw_amount": null,
+          "required_equity": 0.44623655913978494,
+          "seat": 1,
+          "stack": 1930.0,
+          "street": "preflop",
+          "valid_actions": [
+            "all_in",
+            "call",
+            "fold",
+            "raise"
+          ]
+        }
+      ],
+      "hero_position": "BTN",
+      "hero_seat": 1,
+      "hero_total_invested": 10.0,
+      "hole_cards": [
+        "Ts",
+        "6s"
+      ],
+      "positions": {
+        "0": "BB",
+        "1": "BTN"
+      },
+      "pot": 20.0,
+      "showdown": null,
+      "table_id": "4ac3d16d-2aee-4d89-b810-217dc3afe930",
+      "winners": [
+        {
+          "amount": 20,
+          "hand_description": null,
+          "name": "Nemesis",
+          "seat": 0,
+          "stack": 2070
+        }
+      ]
+    }
+  ],
+  "schema_version": 1,
+  "session": {
+    "big_blind": 20.0,
+    "bot_path": "/home/wowthecoder/fullhouse-pokerbot/bots/my_bots/complete_v3.py",
+    "buy_in": 2000.0,
+    "hero_name": "PokeyDokey",
+    "table_id": "4ac3d16d-2aee-4d89-b810-217dc3afe930",
+    "ws_url": "wss://openpoker.ai/ws"
+  },
+  "summary": {
+    "chip_delta": 56.0,
+    "first_hand_id": "130ced11-a75e-468e-a3d3-3d762b0d870f",
+    "hands": 10,
+    "hands_with_known_delta": 10,
+    "last_hand_id": "43da926d-72a4-4e17-ba1b-afd75cea051e"
+  },
+  "updated_at": "2026-06-02T04:33:57.582852+00:00"
+}

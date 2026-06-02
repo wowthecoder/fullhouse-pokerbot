@@ -33,16 +33,17 @@ app = Flask(__name__)
 BOT_PATHS = {
     "The Aggressor": "bots/aggressor.py",
     "The Mathematician": "bots/mathematician.py",
-    # "The Shark": "bots/shark.py",
+    "The Shark": "bots/shark.py",
     # "Loose passive": "bots/loose_passive.py",
     "Complete v1": "bots/my_bots/complete_v1.py",
-    "Complete no exploit": "bots/my_bots/complete_no_opponent_model.py",
-    "BlackRain79": "bots/my_bots/blackrain79.py",
+    # "Complete no exploit": "bots/my_bots/complete_no_opponent_model.py",
+    # "BlackRain79": "bots/my_bots/blackrain79.py",
     # "G5 Bot": "bots/my_bots/g5-bot.py",
     "Complete v2": "bots/my_bots/complete_v2.py",
+    "Complete v3": "bots/my_bots/complete_v3.py",
 }
 
-MY_BOT_PATH = "bots/my_bots/complete_v2.py"
+MY_BOT_PATH = "bots/my_bots/complete_v3.py"
 RUN_HANDS_COUNT = 500
 ROUND_ROBIN_HANDS = 500
 

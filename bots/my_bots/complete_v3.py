@@ -1,11 +1,10 @@
-"""V1 with the following fixes and enhancements: 
-1. Better flop, turn and river strategy, 
-2. Monte Carlo Equity estimation 
-3. Better opponent modeling and exploitation"""
+"""V2 with the following fixes and enhancements: {}"""
 
 import bisect
 import hashlib
 import itertools
+import json
+import os
 import random
 import time as _time
 from math import erf, sqrt
@@ -30,7 +29,7 @@ EQUITY_RANGE_CACHE = {}
 MAX_EQUITY_RANGE_CACHE = 128
 EQUITY_RESULT_CACHE = {}
 MAX_EQUITY_RESULT_CACHE = 256
-EQUITY_ESTIMATE_TIME_LIMIT_SECONDS = 0.8
+EQUITY_ESTIMATE_TIME_LIMIT_SECONDS = 0.1
 MIN_TIMEOUT_EQUITY_SAMPLES = 20
 MIN_TIMEOUT_EQUITY_SAMPLE_FRACTION = 0.12
 EVAL7_TYPE_MAP = {
@@ -58,6 +57,41 @@ MADE_VALUE = {
     "straight flush": 8,
 }
 
+
+def _load_bot_data_file(name):
+    here = os.path.dirname(__file__)
+    candidates = []
+    env_dir = os.environ.get("BOT_DATA_DIR")
+    if env_dir:
+        candidates.append(env_dir)
+    candidates.extend(
+        (
+            os.path.join(here, "data"),
+            os.path.join(here, "complete_v3_data"),
+        )
+    )
+    for data_dir in candidates:
+        path = os.path.join(data_dir, name)
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                return handle.read()
+        except Exception:
+            pass
+    return ""
+
+
+def _load_json_data(name, default):
+    raw = _load_bot_data_file(name)
+    if not raw:
+        return default
+    try:
+        return json.loads(raw)
+    except Exception:
+        return default
+
+
+COMPLETE_EQUITY_TABLES = _load_json_data("equity_tables.json", {})
+
 SIZING_RULES = {
     "rfi": 2.5,
     "sb_rfi": 3.0,
@@ -78,6 +112,10 @@ MIN_FOLD_TO_THREEBET_OPPS = 6
 MIN_CBET_OPPS = 6
 MIN_POSTFLOP_ACTIONS = 8
 FOURBET_JAM_THRESHOLD_BB = 25.0
+PREFLOP_COMMIT_RAISE_FRACTION = 0.35
+PREFLOP_COMMITTED_CALL_MAX_REQUIRED = 0.18
+DEEP_THREEBET_CALL_MIN_EQUITY = 0.33
+DEEP_VALUE_FOURBET_MIN_EQUITY = 0.44
 
 OPPONENT_MODELS = {}
 HAND_OBSERVATIONS = {}
@@ -2292,6 +2330,12 @@ def _flop_mixed_frequency_allows(state, bucket, role, frequency):
     return stable_mix(state, f"flop_{bucket}_{role}", frequency)
 
 
+def _simple_range_cbet_board(bucket, board):
+    if bucket in {"A_high_dry", "K_high_dry", "paired_high", "paired_low"}:
+        return True
+    return bucket == "static_high" and board.get("top_rank") == RANK_VALUE["Q"]
+
+
 def _should_check_strong_blocker(info, board, bucket, role):
     if role != "IP_PFA" or info.get("strength") not in {"monster", "tptk_plus"}:
         return False
@@ -2848,11 +2892,248 @@ def _rule_based_equity_estimate(hero_cards, board_cards, villain_range=None, opp
     return _clamp(base, 0.03, 0.97)
 
 
+def _equity_lookup_hero_class(info, hole, board_cards):
+    made = info.get("made", 0)
+    if made >= MADE_VALUE["two pair"]:
+        return "two_pair_plus"
+    if info.get("combo_draw"):
+        return "combo_draw"
+    if info.get("overpair"):
+        return "overpair"
+    if info.get("tptk"):
+        return "top_pair_top_kicker"
+    if info.get("top_pair"):
+        return "top_pair_weak_kicker"
+    hole = tuple(hole)
+    board_cards = tuple(board_cards)
+    if len(hole) >= 2 and hole[0][0] == hole[1][0] and board_cards:
+        pair_value = RANK_VALUE[hole[0][0]]
+        board_top = max(RANK_VALUE[card[0]] for card in board_cards)
+        if pair_value < board_top and made == MADE_VALUE["pair"]:
+            return "underpair"
+    if info.get("strength") == "medium_pair":
+        return "middle_pair"
+    if info.get("nut_flush_draw"):
+        return "nut_flush_draw"
+    if info.get("flush_draw"):
+        return "non_nut_flush_draw"
+    if info.get("oesd"):
+        return "oesd"
+    if info.get("gutshot"):
+        return "gutshot"
+    return "air"
+
+
+def _equity_lookup_range_bucket(state):
+    actions = _preflop_actions(state)
+    positions = _preflop_positions(state)
+    hero_seat = state.get("seat_to_act")
+    villain_seats = {player.get("seat") for player in _opponents_in_hand(state)}
+    villain_raises = [
+        entry
+        for entry in actions
+        if entry.get("seat") in villain_seats and entry.get("action") in {"raise", "all_in"}
+    ]
+    raises = [entry for entry in actions if entry.get("action") in {"raise", "all_in"}]
+    if not actions:
+        return "random"
+    if any(entry.get("action") == "all_in" for entry in villain_raises) or len(raises) >= 4:
+        return "premium_aa_kk"
+    if len(raises) >= 3:
+        return "fourbet_5"
+    if len(raises) >= 2:
+        return "threebet_8"
+    if villain_raises:
+        opener_pos = positions.get(villain_raises[0].get("seat"))
+        if opener_pos in {"BTN", "SB"}:
+            return "steal_45"
+        if opener_pos in {"LJ", "HJ"}:
+            return "open_20"
+        return "open_30"
+    if any(entry.get("seat") != hero_seat and entry.get("action") == "call" for entry in actions):
+        return "open_30"
+    return "random"
+
+
+def _equity_lookup_flop_record(state, info=None, board=None):
+    if state.get("street") != "flop":
+        return None
+    board_cards = tuple(state.get("community_cards", []))
+    hero_cards = tuple(state.get("your_cards", []))
+    if len(board_cards) != 3 or len(hero_cards) < 2:
+        return None
+    cells = COMPLETE_EQUITY_TABLES.get("flop", {}).get("cells", {})
+    if not cells:
+        return None
+    board = board or _board_class(board_cards)
+    info = info or _strategic_hand_info(hero_cards, board_cards)
+    key = "|".join(
+        (
+            _equity_lookup_hero_class(info, hero_cards, board_cards),
+            _flop_bucket(board),
+            _equity_lookup_range_bucket(state),
+            _postflop_role(state),
+        )
+    )
+    record = cells.get(key)
+    if not record:
+        return None
+    try:
+        equity = float(record.get("equity"))
+    except Exception:
+        return None
+    if equity <= 0:
+        return None
+    return record
+
+
+def _turn_lookup_hand_class(info):
+    made = info.get("made", 0)
+    hand_type = info.get("type")
+    if made >= MADE_VALUE["flush"]:
+        return "flush_plus"
+    if made >= MADE_VALUE["straight"]:
+        return "straight_plus"
+    if info.get("set") or info.get("trips") or made >= MADE_VALUE["full house"]:
+        return "set_plus"
+    if made >= MADE_VALUE["two pair"] or info.get("strong_two_pair"):
+        return "two_pair_plus"
+    if info.get("overpair"):
+        return "overpair"
+    if info.get("tptk"):
+        return "top_pair_good_kicker"
+    if info.get("top_pair"):
+        return "top_pair_weak_kicker"
+    if info.get("strength") == "medium_pair" or made == MADE_VALUE["pair"]:
+        return "middle_pair" if hand_type == "pair" else "weak_pair"
+    if info.get("showdown"):
+        return "weak_pair"
+    return "air"
+
+
+def _turn_lookup_draw_class(info):
+    if info.get("combo_draw"):
+        return "combo_draw"
+    if info.get("nut_flush_draw"):
+        return "nut_flush_draw"
+    if info.get("flush_draw"):
+        return "flush_draw"
+    if info.get("oesd"):
+        return "oesd"
+    if info.get("gutshot"):
+        return "gutshot"
+    return "none"
+
+
+def _turn_lookup_card_bucket(effect):
+    if effect.get("completes_flush"):
+        return "completes_flush"
+    if effect.get("completes_straight"):
+        return "completes_straight"
+    if effect.get("pairs_board"):
+        return "pairs_board"
+    if effect.get("overcard_to_flop"):
+        return "overcard"
+    if effect.get("adds_flush_draw"):
+        return "adds_flush_draw"
+    if effect.get("turn_dynamic") and not effect.get("flop_dynamic"):
+        return "adds_straight_draw"
+    return "blank"
+
+
+def _turn_lookup_board_texture(board, effect):
+    if effect.get("completes_flush"):
+        return "flush_completed"
+    if effect.get("completes_straight"):
+        return "straight_completed"
+    if board.get("monotone"):
+        return "monotone"
+    if board.get("paired"):
+        return "paired"
+    if board.get("two_tone"):
+        if board.get("straight_potential", 0) >= 4 or board.get("is_dynamic"):
+            return "very_wet"
+        return "two_tone"
+    if board.get("straight_potential", 0) >= 4 or board.get("low_connected"):
+        return "straighty"
+    if board.get("is_dynamic"):
+        return "very_wet"
+    return "dry"
+
+
+def _turn_lookup_spr_bucket(state):
+    pot = max(1, int(state.get("pot", 1)))
+    spr = max(0, int(state.get("your_stack", 0))) / pot
+    if spr <= 1.75:
+        return "low"
+    if spr <= 4.0:
+        return "medium"
+    return "high"
+
+
+def _equity_lookup_turn_record(state, info=None, board=None, role=None):
+    if state.get("street") != "turn":
+        return None
+    if len(_opponents_in_hand(state)) != 1:
+        return None
+    board_cards = tuple(state.get("community_cards", []))
+    hero_cards = tuple(state.get("your_cards", []))
+    if len(board_cards) != 4 or len(hero_cards) < 2:
+        return None
+    cells = COMPLETE_EQUITY_TABLES.get("turn", {}).get("cells", {})
+    if not cells:
+        return None
+    board = board or _board_class(board_cards)
+    info = info or _strategic_hand_info(hero_cards, board_cards)
+    role = role or _postflop_role(state)
+    effect = classify_turn_card(board_cards[:3], board_cards[3], role)
+    key = "|".join(
+        (
+            _turn_lookup_hand_class(info),
+            _turn_lookup_draw_class(info),
+            _turn_lookup_board_texture(board, effect),
+            _turn_lookup_card_bucket(effect),
+            _equity_lookup_range_bucket(state),
+            role,
+            _turn_lookup_spr_bucket(state),
+        )
+    )
+    record = cells.get(key)
+    if not record:
+        return None
+    try:
+        equity = float(record.get("equity"))
+    except Exception:
+        return None
+    if equity <= 0:
+        return None
+    return record
+
+
+def _preflop_lookup_equity(hand, range_bucket, opponent_count=1):
+    preflop = COMPLETE_EQUITY_TABLES.get("preflop", {})
+    if opponent_count > 1 and range_bucket == "random":
+        row = preflop.get("multiway_random", {}).get(hand, {})
+        value = row.get(str(opponent_count))
+    else:
+        row = preflop.get("heads_up", {}).get(hand, {})
+        value = row.get(range_bucket)
+    try:
+        return _clamp(float(value), 0.0, 1.0)
+    except Exception:
+        return None
+
+
+def _preflop_lookup_clears(hand, range_bucket, minimum):
+    equity = _preflop_lookup_equity(hand, range_bucket)
+    return equity is None or equity >= minimum
+
+
 def _estimate_equity(
     hero_cards,
     board_cards,
     villain_range,
-    samples=600,
+    samples=100,
     rng=None,
     time_limit=EQUITY_ESTIMATE_TIME_LIMIT_SECONDS,
 ):
@@ -2919,7 +3200,7 @@ def _estimate_state_equity(state, samples=None):
     board_cards = list(state.get("community_cards", []))
 
     if samples is None:
-        street_samples = {"flop": 220, "turn": 160, "river": 0}
+        street_samples = {"flop": 200, "turn": 150, "river": 0}
         samples = street_samples.get(state.get("street"), 180)
 
     actions_len = len(_observed_actions(state))
@@ -2938,6 +3219,13 @@ def _estimate_state_equity(state, samples=None):
     if cached is not None:
         return cached
 
+    lookup_record = _equity_lookup_flop_record(state)
+    if lookup_record is not None:
+        return _cache_equity_result(cache_key, _clamp(float(lookup_record["equity"])))
+    lookup_record = _equity_lookup_turn_record(state)
+    if lookup_record is not None:
+        return _cache_equity_result(cache_key, _clamp(float(lookup_record["equity"])))
+
     villain_range = _build_heads_up_villain_range(state, board_cards)
     if villain_range is None:
         return None
@@ -2954,6 +3242,17 @@ def _estimate_state_equity(state, samples=None):
 
 
 def _equity_realization_factor(state, info):
+    lookup_record = _equity_lookup_flop_record(state, info=info)
+    if lookup_record is None:
+        lookup_record = _equity_lookup_turn_record(state, info=info)
+    if lookup_record is not None:
+        try:
+            equity = float(lookup_record.get("equity"))
+            realized = float(lookup_record.get("realized_equity"))
+            if equity > 0:
+                return _clamp(realized / equity, 0.55, 1.10)
+        except Exception:
+            pass
     street = state.get("street")
     factor = {"flop": 0.88, "turn": 0.94, "river": 1.00}.get(street, 0.92)
     if _postflop_in_position(state):
@@ -3259,288 +3558,108 @@ def _river_context(state, info, board, role):
     return context
 
 
-def _river_bet_candidates(state):
+def _river_policy_table():
+    return COMPLETE_EQUITY_TABLES.get("river_policy", {}).get("table", {})
+
+
+def _river_role_bucket(role):
+    if role in {"IP_PFA", "OOP_PFA", "IP_CALLER", "OOP_CALLER"}:
+        return role
+    return "NEUTRAL"
+
+
+def _river_spr_bucket(state):
     pot = max(1, int(state.get("pot", 1)))
-    hero_bet = int(state.get("your_bet_this_street", 0))
-    max_total = hero_bet + int(state.get("your_stack", 0))
-    current_bet = int(state.get("current_bet", 0))
-    min_raise_to = int(state.get("min_raise_to", 0))
-    candidates = [{"kind": "check", "fraction": 0.0, "target": hero_bet, "cost": 0, "all_in": False}]
-    seen_targets = {hero_bet}
-
-    for fraction in (0.25, 0.33, 0.67, 0.80, 1.00, 1.25):
-        target = max(min_raise_to, hero_bet + int(round(pot * fraction)))
-        target = min(target, max_total)
-        if target <= current_bet or target <= hero_bet or target in seen_targets:
-            continue
-        seen_targets.add(target)
-        candidates.append({
-            "kind": "bet",
-            "fraction": fraction,
-            "target": target,
-            "cost": target - hero_bet,
-            "all_in": target >= max_total,
-        })
-
-    spr = int(state.get("your_stack", 0)) / pot
-    if spr <= 1.25 and max_total > hero_bet and max_total not in seen_targets:
-        candidates.append({
-            "kind": "bet",
-            "fraction": int(state.get("your_stack", 0)) / pot,
-            "target": max_total,
-            "cost": max_total - hero_bet,
-            "all_in": True,
-        })
-    return candidates
+    spr = max(0, int(state.get("your_stack", 0))) / pot
+    if spr <= 0.75:
+        return "tiny"
+    if spr <= 1.75:
+        return "low"
+    if spr <= 4.0:
+        return "mid"
+    return "high"
 
 
-def _river_continue_weight(info, board, bet_fraction, model):
-    context = board.get("river_context", {}) if isinstance(board, dict) else {}
-    label = context.get("villain_label") or _label_for_model(model)
-    made = info["made"]
-    if info["plays_board"]:
-        base = 0.10
-    elif made >= MADE_VALUE["straight"]:
-        base = 0.98
-    elif made == MADE_VALUE["three of a kind"]:
-        base = 0.86
-    elif made == MADE_VALUE["two pair"]:
-        base = 0.78 if info.get("strong_two_pair") else 0.62
-    elif info.get("overpair") or info.get("tptk"):
-        base = 0.68
-    elif info.get("top_pair"):
-        base = 0.52
-    elif made == MADE_VALUE["pair"]:
-        base = 0.32
-    else:
-        base = 0.06
-
-    if info.get("nut_flush_blocker") and board["monotone"]:
-        base += 0.08
-    if board["paired"] and made < MADE_VALUE["full house"]:
-        base -= 0.06
-    if board["monotone"] and made < MADE_VALUE["flush"]:
-        base -= 0.08
-    if context.get("completed_draw") and made < MADE_VALUE["straight"]:
-        base -= 0.08
-    if context.get("range_capped_villain") and made <= MADE_VALUE["pair"]:
-        base += 0.08
-    if context.get("missed_draw_density", 0.0) >= 0.25 and made == MADE_VALUE["high card"]:
-        base -= 0.12
-    if context.get("hero_blocks_bluffs") and made <= MADE_VALUE["pair"]:
-        base += 0.05
-
-    base += {
-        "calling_station": 0.20,
-        "aggressive": 0.06,
-        "unknown": 0.0,
-        "tight_passive": -0.06,
-        "nit": -0.11,
-        "overfolder": -0.16,
-    }.get(label, 0.0)
-    if model and model.river_actions >= 8:
-        base += (model.river_calls / max(1, model.river_actions) - 0.30) * 0.28
-        base += (model.bayes_wtsd - 0.27) * 0.30
-
-    size_pressure = max(0.0, bet_fraction - 0.33) * 0.34
-    if made <= MADE_VALUE["pair"]:
-        size_pressure *= 1.35
-    elif made >= MADE_VALUE["straight"]:
-        size_pressure *= 0.35
-    return _clamp(base - size_pressure, 0.01, 1.0)
+def _river_missed_draw_bucket(context):
+    density = float(context.get("missed_draw_density", 0.0))
+    if density >= 0.35:
+        return "high"
+    if density >= 0.18:
+        return "med"
+    return "low"
 
 
-def _river_calling_range(villain_range, board, bet_fraction, model):
-    items = []
-    board_cards = tuple(board.get("cards", ())) if isinstance(board, dict) else tuple(board)
-    if not board_cards and isinstance(board, dict):
-        board_cards = tuple(board.get("board_cards", ()))
-    for c1, c2, weight in villain_range.get("items", []):
-        info = _strategic_hand_info((c1, c2), board_cards)
-        continue_weight = _river_continue_weight(info, board if isinstance(board, dict) else _board_class(board_cards), bet_fraction, model)
-        if continue_weight > 0:
-            items.append((c1, c2, weight * continue_weight))
-    return _make_weighted_range(items)
-
-
-def _river_raise_probability(state, bet_fraction, board, model, context=None):
-    context = context or (board.get("river_context", {}) if isinstance(board, dict) else {})
-    if not model:
-        base = 0.045
-    else:
-        river_rate = model.river_bets_raises / max(1, model.river_actions)
-        base = 0.035 + river_rate * 0.35 + model.bayes_postflop_aggression_frequency * 0.12
-    label = _label_for_model(model)
-    base += {
-        "aggressive": 0.07,
-        "calling_station": -0.025,
-        "nit": -0.015,
-        "tight_passive": -0.025,
-        "overfolder": -0.01,
-    }.get(label, 0.0)
-    base += max(0.0, bet_fraction - 0.67) * 0.05
-    if board["paired"] or board["monotone"]:
-        base += 0.025
-    if context.get("range_capped_villain"):
-        base -= 0.025
+def _river_board_bucket(board, context):
+    if (
+        context.get("completed_frontdoor_flush")
+        or context.get("completed_backdoor_flush")
+        or board.get("monotone")
+    ):
+        return "flushy"
+    if context.get("completed_straight_draw") or board.get("straight_potential", 0) >= 4:
+        return "straighty"
     if context.get("completed_draw"):
-        base += 0.025
-    return _clamp(base, 0.0, 0.35)
+        return "scary"
+    if board.get("paired"):
+        return "paired"
+    if board.get("is_dynamic"):
+        return "scary"
+    return "safe"
 
 
-def _river_bet_alpha(pot, bet_cost):
-    return bet_cost / max(1.0, pot + bet_cost)
-
-
-def _river_candidate_permitted(candidate, context):
-    if candidate["kind"] == "check":
-        return True
-    hand_class = context.get("hand_class")
-    fraction = candidate["fraction"]
-    if candidate["all_in"] and hand_class != "nutted":
-        return False
-    if hand_class == "nutted":
-        return fraction >= 0.67 or candidate["all_in"]
-    if hand_class == "strong":
-        if context.get("completed_draw") and not context.get("hero_blocks_value"):
-            return fraction <= 0.33
-        return 0.25 <= fraction <= 0.80
-    if hand_class == "thin":
-        return fraction <= 0.33
-    if hand_class == "bluff_candidate":
-        return fraction >= 0.67
-    if hand_class == "bluffcatcher":
-        return fraction <= 0.33 and context.get("range_capped_villain")
-    return False
-
-
-def _river_bluff_frequency_allows(state, candidate, context, fold_prob, equity_when_called):
-    if context.get("hand_class") != "bluff_candidate":
-        return True
-    if not context.get("hero_blocks_value") or context.get("hero_blocks_bluffs"):
-        return False
-    pot = max(1, int(state.get("pot", 1)))
-    alpha = _river_bet_alpha(pot, max(1, int(candidate["cost"])))
-    if fold_prob <= alpha:
-        return False
-    if fold_prob >= alpha + 0.25 and equity_when_called <= 0.20:
-        return True
-
-    max_frequency = alpha / max(0.05, 1.0 - alpha)
-    if context.get("range_capped_villain"):
-        max_frequency += 0.08
-    if context.get("missed_draw_density", 0.0) >= 0.25:
-        max_frequency += 0.08
-    max_frequency = _clamp(max_frequency, 0.12, 0.72)
-    return stable_mix(state, f"river_bluff_{candidate['target']}_{candidate['fraction']}", max_frequency)
-
-
-def _score_river_bet_action(state, board, villain_range, candidate, model, context=None):
-    context = context or {}
-    pot = max(1, int(state.get("pot", 1)))
-    if candidate["kind"] == "check":
-        equity = _estimate_equity(
-            state.get("your_cards", []),
-            state.get("community_cards", []),
-            villain_range,
-            samples=0,
-            rng=random.Random(_stable_seed_for_state(state, state.get("community_cards", []))),
+def _river_policy_key_from_context(state, info, board, role, context, villain_label=None):
+    villain_label = villain_label or context.get("villain_label") or _opponent_label(state)
+    if villain_label not in {"unknown", "nit", "tight_passive", "calling_station", "aggressive", "overfolder"}:
+        villain_label = "unknown"
+    return "|".join(
+        map(
+            str,
+            (
+                context.get("hand_class") or _river_hand_class(info),
+                _river_role_bucket(role),
+                _river_board_bucket(board, context),
+                villain_label,
+                1 if context.get("range_capped_villain") else 0,
+                1 if context.get("hero_blocks_value") else 0,
+                1 if context.get("hero_blocks_bluffs") else 0,
+                _river_missed_draw_bucket(context),
+                _river_spr_bucket(state),
+            ),
         )
-        if equity is None:
-            return None
-        return {
-            "candidate": candidate,
-            "ev": equity * pot,
-            "equity": equity,
-            "fold_prob": 0.0,
-            "raise_prob": 0.0,
-        }
-    if not _river_candidate_permitted(candidate, context):
-        return {"candidate": candidate, "ev": -float(pot), "equity": None, "fold_prob": 0.0, "raise_prob": 0.0}
-
-    bet_cost = max(1, int(candidate["cost"]))
-    river_board = {**board, "cards": tuple(state.get("community_cards", [])), "river_context": context}
-    calling_range = _river_calling_range(
-        villain_range,
-        river_board,
-        candidate["fraction"],
-        model,
     )
-    if not calling_range.get("items") or villain_range.get("total", 0.0) <= 0:
+
+
+def _river_table_decision(state, info, board, role):
+    if state.get("street") != "river" or not state.get("can_check"):
+        return None
+    if len(_opponents_in_hand(state)) != 1:
+        return None
+    table = _river_policy_table()
+    if not table:
         return None
 
-    equity = _estimate_equity(
-        state.get("your_cards", []),
-        state.get("community_cards", []),
-        calling_range,
-        samples=0,
-        rng=random.Random(_stable_seed_for_state(state, state.get("community_cards", []))),
-    )
-    if equity is None:
-        return None
-
-    continue_prob = _clamp(calling_range["total"] / max(1e-9, villain_range["total"]))
-    raise_prob = 0.0 if candidate["all_in"] else _river_raise_probability(state, candidate["fraction"], river_board, model)
-    raise_prob = min(raise_prob, continue_prob)
-    fold_prob = _clamp(1.0 - continue_prob)
-    call_prob = max(0.0, 1.0 - fold_prob - raise_prob)
-    ev_when_called = equity * (pot + bet_cost) - (1.0 - equity) * bet_cost
-    raise_penalty = bet_cost + max(0.0, equity - 0.50) * (pot + bet_cost)
-    ev = fold_prob * pot + call_prob * ev_when_called - raise_prob * raise_penalty
-    if not _river_bluff_frequency_allows(state, candidate, context, fold_prob, equity):
-        ev = -float(pot)
-    return {
-        "candidate": candidate,
-        "ev": ev,
-        "equity": equity,
-        "fold_prob": fold_prob,
-        "raise_prob": raise_prob,
-    }
-
-
-def _choose_close_river_action(state, scored):
-    pot = max(1, int(state.get("pot", 1)))
-    threshold = max(10.0, pot * 0.02)
-    best_ev = max(item["ev"] for item in scored)
-    close = [item for item in scored if item["ev"] >= 0 and best_ev - item["ev"] <= threshold]
-    if not close:
-        close = [max(scored, key=lambda item: item["ev"])]
-    if len(close) == 1:
-        return close[0]
-
-    floor = min(item["ev"] for item in close)
-    weights = [max(1.0, item["ev"] - floor + 1.0) for item in close]
-    total = sum(weights)
-    pick = _stable_mix_roll(state, "river_close_ev") * total
-    running = 0.0
-    for item, weight in zip(close, weights):
-        running += weight
-        if pick <= running:
-            return item
-    return close[-1]
-
-
-def _river_ev_decision(state, info, board, role):
-    opponents = _opponents_in_hand(state)
-    if len(opponents) != 1:
-        return None
-    board_cards = list(state.get("community_cards", []))
-    villain_range = _build_heads_up_villain_range(state, board_cards)
-    if not villain_range or not villain_range.get("items"):
-        return None
-    model = _model_for_seat(state, opponents[0].get("seat"))
     context = _river_context(state, info, board, role)
-    scored = []
-    for candidate in _river_bet_candidates(state):
-        item = _score_river_bet_action(state, board, villain_range, candidate, model, context)
-        if item is None:
-            return None
-        scored.append(item)
-    choice = _choose_close_river_action(state, scored)
-    candidate = choice["candidate"]
-    if candidate["kind"] == "check":
+    key = _river_policy_key_from_context(state, info, board, role, context)
+    entry = table.get(key)
+    if entry is None:
+        key = _river_policy_key_from_context(state, info, board, role, context, villain_label="unknown")
+        entry = table.get(key)
+    if entry is None:
+        return None
+
+    action = entry.get("action", "check")
+    try:
+        fraction = float(entry.get("fraction", 0.0))
+    except Exception:
+        fraction = 0.0
+    if action != "bet" or fraction <= 0:
         return {"action": "check"}
-    return _raise_to(state, candidate["target"])
+    if context.get("hand_class") == "bluff_candidate" and _opponent_label(state) == "calling_station":
+        return {"action": "check"}
+    if context.get("hand_class") == "thin" and fraction > 0.33:
+        if _river_board_bucket(board, context) in {"flushy", "straighty", "scary"}:
+            fraction = 0.33
+    return _river_bet_fraction(state, fraction, info)
 
 
 def _river_estimated_bluff_density(context, label):
@@ -3585,6 +3704,52 @@ def _river_facing_bet_decision(state, info, board, role):
     return None
 
 
+def _postflop_commitment_call_guard(
+    state,
+    info,
+    board,
+    equity,
+    realized,
+    required,
+    near_nut,
+    reverse_danger,
+    opponents,
+):
+    owed = max(0, int(state.get("amount_owed", 0)))
+    if owed <= 0:
+        return None
+
+    stack_before_call = max(1, int(state.get("your_stack", 0)) + owed)
+    call_fraction_of_stack = owed / stack_before_call
+    strength = info.get("strength", "air")
+    weak_or_air = strength in {"air", "weak_equity"}
+    strong_made = strength in {"monster", "tptk_plus", "top_pair"}
+    medium_showdown = not weak_or_air
+    has_good_draw = bool(
+        info.get("nut_flush_draw")
+        or strength == "strong_draw"
+        or info.get("combo_draw")
+        or info.get("draw_power", 0.0) >= 0.67
+    )
+
+    if near_nut and not reverse_danger and opponents == 1:
+        return {"action": "call"}
+
+    if required <= 0.18:
+        if medium_showdown or has_good_draw or realized >= required - 0.02:
+            return {"action": "call"}
+
+    if call_fraction_of_stack >= 0.40:
+        if realized >= required + 0.03:
+            return {"action": "call"}
+        if strong_made and opponents == 1 and not reverse_danger and required <= 0.30:
+            return {"action": "call"}
+        if has_good_draw and realized >= required:
+            return {"action": "call"}
+
+    return None
+
+
 def _facing_postflop_bet(state, info, board):
     if max(0, int(state.get("amount_owed", 0))) <= 0:
         return {"action": "check"} if state.get("can_check") else {"action": "call"}
@@ -3611,9 +3776,22 @@ def _facing_postflop_bet(state, info, board):
         margin += 0.055
     stack_before_call = max(1, int(state.get("your_stack", 0)) + max(0, int(state.get("amount_owed", 0))))
     call_commitment = max(0, int(state.get("amount_owed", 0))) / stack_before_call
-    if call_commitment >= 0.40 and not near_nut:
-        margin += 0.08
     realized = equity * _equity_realization_factor(state, info)
+    commitment_call = _postflop_commitment_call_guard(
+        state=state,
+        info=info,
+        board=board,
+        equity=equity,
+        realized=realized,
+        required=required,
+        near_nut=near_nut,
+        reverse_danger=reverse_danger,
+        opponents=opponents,
+    )
+    if commitment_call is not None:
+        return commitment_call
+    if call_commitment >= 0.40 and not near_nut and reverse_danger:
+        margin += 0.03
     if realized >= required + margin:
         return {"action": "call"}
 
@@ -3655,6 +3833,13 @@ def _flop_decision(state, info, board, role):
     heads_up = len(_opponents_in_hand(state)) <= 1
     opponent = _opponent_label(state)
     bucket = _flop_bucket(board)
+    dry_range_board = _simple_range_cbet_board(bucket, board)
+    if role in {"IP_PFA", "OOP_PFA"} and heads_up:
+        if info["strength"] in {"monster", "tptk_plus", "top_pair", "strong_draw"}:
+            return _bet_fraction(state, 0.33 if dry_range_board else 0.50)
+        if dry_range_board and stable_mix(state, "simple_range_cbet", 0.60):
+            return _bet_fraction(state, 0.33)
+
     plan = _flop_plan_for_role(bucket, role, pot_type)
     size = _postflop_size(state, board, info, role)
     equity_bucket = _flop_equity_bucket(state, info)
@@ -3791,9 +3976,9 @@ def _river_decision(state, info, board, role):
             return river_call
         return _facing_postflop_bet(state, info, board)
 
-    ev_action = _river_ev_decision(state, info, board, role)
-    if ev_action is not None:
-        return ev_action
+    table_action = _river_table_decision(state, info, board, role)
+    if table_action is not None:
+        return table_action
 
     opponent = _opponent_label(state)
     if info["strength"] == "monster":
@@ -3836,6 +4021,100 @@ def _effective_stack_bb(state):
     ]
     effective = min([hero_total] + opponents) if opponents else hero_total
     return effective / max(1, big_blind)
+
+
+def _commit_fraction_after_raise(state, target):
+    invested = int(state.get("your_bet_this_street", 0))
+    stack = int(state.get("your_stack", 0))
+    total_stack_at_street_start = max(1, invested + stack)
+    target = int(target)
+    if target <= invested:
+        return invested / total_stack_at_street_start
+    return target / total_stack_at_street_start
+
+
+def _preflop_stackoff_allowed(hand, situation, state):
+    eff_bb = _effective_stack_bb(state)
+    spot = situation.get("type")
+    hero_pos = situation.get("hero_pos")
+
+    if eff_bb <= 30:
+        return hand in {"AA", "KK", "QQ", "JJ", "AKs", "AKo", "AQs"}
+    if eff_bb <= 60:
+        return hand in {"AA", "KK", "QQ", "AKs", "AKo"}
+    if eff_bb <= 110:
+        if hero_pos in {"BTN", "SB", "BB"} or spot in {"bb_vs_sb_raise", "hero_opened_faces_squeeze"}:
+            return hand in {"AA", "KK", "QQ", "AKs", "AKo"}
+        return hand in {"AA", "KK", "QQ", "AKs"}
+    if eff_bb <= 160:
+        if spot in {"bb_vs_sb_raise"}:
+            return hand in {"AA", "KK", "QQ", "AKs"}
+        return hand in {"AA", "KK", "AKs"}
+    return hand in {"AA", "KK"}
+
+
+def _guard_committing_preflop_raise(action, hand, situation, state, amount):
+    if amount is None:
+        return None
+
+    spot = situation.get("type")
+    aggressive_spots = {
+        "hero_opened_faces_3bet",
+        "hero_opened_faces_squeeze",
+        "raise_and_3bet_before_hero",
+        "threebet_or_fourbet_tree",
+        "sb_faces_raise_after_raise",
+        "open_plus_callers_before_hero",
+    }
+    if action not in {"3bet", "4bet", "5bet", "squeeze", "cold_4bet"} and spot not in aggressive_spots:
+        return None
+
+    if _commit_fraction_after_raise(state, amount) < PREFLOP_COMMIT_RAISE_FRACTION:
+        return None
+
+    if _preflop_stackoff_allowed(hand, situation, state):
+        return {"action": "all_in"}
+
+    if spot in {"hero_opened_faces_3bet", "hero_opened_faces_squeeze"} and hand in {
+        "QQ", "JJ", "TT", "99", "AQs", "AJs", "KQs", "QJs", "JTs", "T9s", "98s",
+    }:
+        return {"action": "call"}
+
+    return {"action": "fold"}
+
+
+def _guarded_preflop_raise(action, hand, situation, state, amount):
+    guarded = _guard_committing_preflop_raise(action, hand, situation, state, amount)
+    if guarded is not None:
+        return guarded
+    if amount is None:
+        return {"action": "call"} if state.get("amount_owed", 0) > 0 else {"action": "check"}
+    return _raise_to(state, amount)
+
+
+def _committed_preflop_jam_continue(hand, situation, state):
+    invested_fraction = _commit_fraction_after_raise(state, int(state.get("your_bet_this_street", 0)))
+    if invested_fraction < PREFLOP_COMMIT_RAISE_FRACTION:
+        return None
+    if _required_call_equity(state) > PREFLOP_COMMITTED_CALL_MAX_REQUIRED:
+        return None
+    if _preflop_stackoff_allowed(hand, situation, state):
+        return {"action": "all_in"}
+    return None
+
+
+def _fivebet_continue(hand, state):
+    eff = _effective_stack_bb(state)
+
+    if eff > 120:
+        return hand in {"AA", "KK"}
+    if eff > 80:
+        return hand in {"AA", "KK", "QQ", "AKs"}
+    if eff > 50:
+        return hand in {"AA", "KK", "QQ", "AKs", "AKo"}
+    if eff > 30:
+        return hand in {"JJ", "QQ", "KK", "AA", "AKs", "AKo"}
+    return hand in {"TT", "JJ", "QQ", "KK", "AA", "AQs", "AKs", "AKo"}
 
 
 def _squeeze_range_for(opener_pos):
@@ -4105,30 +4384,33 @@ def _missing_source_fallback(hand, situation, state):
 
     if spot_type == "hero_opened_faces_3bet":
         if hand in FOURBET_FALLBACK_VALUE or hand in FOURBET_FALLBACK_BLUFF:
-            return _raise_to(state, _choose_preflop_size("4bet", situation, state))
+            return _guarded_preflop_raise("4bet", hand, situation, state, _choose_preflop_size("4bet", situation, state))
         if hand in {"QQ", "JJ", "TT", "99", "88", "AQs", "AJs", "ATs", "KQs", "KJs", "QJs", "JTs", "T9s", "98s"}:
             return {"action": "call"}
         return {"action": "fold"}
 
     if spot_type == "hero_4bet_faces_5bet":
-        return {"action": "all_in"} if hand in FIVEBET_CALL_SAFE else {"action": "fold"}
+        committed_continue = _committed_preflop_jam_continue(hand, situation, state)
+        if committed_continue is not None:
+            return committed_continue
+        return {"action": "all_in"} if _fivebet_continue(hand, state) else {"action": "fold"}
 
     if spot_type == "raise_and_3bet_before_hero":
         if hand in COLD_4BET_SAFE:
-            return _raise_to(state, 23 * _blind_amounts(state)[1])
+            return _guarded_preflop_raise("cold_4bet", hand, situation, state, 23 * _blind_amounts(state)[1])
         return {"action": "fold"}
 
     if spot_type == "open_plus_callers_before_hero":
         squeeze_range = _squeeze_range_for(situation.get("opener_pos"))
         if hand in squeeze_range:
-            return _raise_to(state, _choose_preflop_size("squeeze", situation, state))
+            return _guarded_preflop_raise("squeeze", hand, situation, state, _choose_preflop_size("squeeze", situation, state))
         if hero_pos in {"BTN", "BB"} and hand in MULTIWAY_CALL_RANGE:
             return {"action": "call"}
         return {"action": "fold"}
 
     if spot_type == "hero_opened_faces_squeeze":
         if hand in FIVEBET_CALL_SAFE:
-            return _raise_to(state, 23 * _blind_amounts(state)[1])
+            return _guarded_preflop_raise("4bet", hand, situation, state, 23 * _blind_amounts(state)[1])
         if hand in {"JJ", "TT", "AQs", "KQs"}:
             return {"action": "call"}
         return {"action": "fold"}
@@ -4145,7 +4427,13 @@ def _missing_source_fallback(hand, situation, state):
 
     if spot_type in {"threebet_or_fourbet_tree", "sb_faces_raise_after_raise"}:
         if hand in {"AA", "KK", "AKs", "AKo"}:
-            return _raise_to(state, int(state.get("current_bet", 0)) * SIZING_RULES["oop_4bet_multiplier"])
+            return _guarded_preflop_raise(
+                "4bet",
+                hand,
+                situation,
+                state,
+                int(state.get("current_bet", 0)) * SIZING_RULES["oop_4bet_multiplier"],
+            )
         if hand in {"QQ", "JJ", "TT", "AQs", "KQs"}:
             return {"action": "call"}
         return {"action": "fold"}
@@ -4254,6 +4542,15 @@ def _apply_exploit_adjustments(action, hand, situation, state):
     if spot_type in {"hero_opened_faces_3bet", "hero_opened_faces_squeeze"}:
         threebettor = _model_for_seat(state, situation.get("threebettor_seat"))
         threebettor_label = _label_for_model(threebettor)
+        if _effective_stack_bb(state) >= 60:
+            if action == "call" and not _preflop_lookup_clears(hand, "threebet_8", DEEP_THREEBET_CALL_MIN_EQUITY):
+                return "fold"
+            if (
+                action == "4bet"
+                and hand in PREMIUMS
+                and not _preflop_lookup_clears(hand, "threebet_8", DEEP_VALUE_FOURBET_MIN_EQUITY)
+            ):
+                return "fold"
         if threebettor_label in {"nit", "tight_passive"} and action in {"call", "4bet"} and hand in NIT_3BET_FOLDS:
             return "fold"
         if threebettor_label in {"nit", "tight_passive"} and action == "4bet" and hand not in PREMIUMS:
@@ -4274,9 +4571,7 @@ def _preflop_decision(state):
         return _missing_source_fallback(hand, situation, state)
     if action in {"raise", "3bet", "4bet", "squeeze", "iso"}:
         amount = _choose_preflop_size(action, situation, state)
-        if amount is None:
-            return {"action": "call"} if state.get("amount_owed", 0) > 0 else {"action": "check"}
-        return _raise_to(state, amount)
+        return _guarded_preflop_raise(action, hand, situation, state, amount)
     if action == "call":
         return {"action": "call"} if state.get("amount_owed", 0) > 0 else {"action": "check"}
     if action == "check":

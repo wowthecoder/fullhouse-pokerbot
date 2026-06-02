@@ -192,7 +192,14 @@ def test_facing_postflop_bet_calls_when_equity_clears_pot_odds(monkeypatch):
 
 
 def test_facing_postflop_bet_folds_when_equity_misses_threshold(monkeypatch):
-    state = make_state(current_bet=700, amount_owed=700, can_check=False, pot=1_000)
+    state = make_state(
+        cards=("4h", "2d"),
+        board=("Ks", "7d", "2c"),
+        current_bet=700,
+        amount_owed=700,
+        can_check=False,
+        pot=1_000,
+    )
     board = bot._board_class(state["community_cards"])
     info = bot._hand_info(state)
     monkeypatch.setattr(bot, "_estimate_state_equity", lambda state, samples=None: 0.20)
@@ -304,6 +311,107 @@ def test_facing_postflop_bet_is_not_rescued_by_hand_tier_when_equity_is_low(monk
 
     assert info["strength"] == "tptk_plus"
     assert bot._facing_postflop_bet(state, info, board) == {"action": "fold"}
+
+
+def test_non_nut_monster_does_not_auto_call_dangerous_jam(monkeypatch):
+    state = make_state(
+        cards=("9c", "7c"),
+        board=("Qd", "Jd", "Td", "8d", "2c"),
+        street="river",
+        current_bet=2_000,
+        amount_owed=2_000,
+        can_check=False,
+        pot=3_000,
+        your_stack=2_000,
+    )
+    board = bot._board_class(state["community_cards"])
+    info = bot._hand_info(state)
+    monkeypatch.setattr(bot, "_estimate_state_equity", lambda state, samples=None: 0.30)
+    monkeypatch.setattr(bot, "_equity_realization_factor", lambda state, info: 1.0)
+
+    assert info["strength"] == "monster"
+    assert bot._reverse_implied_danger(info, state["community_cards"], state["your_cards"]) is True
+    assert bot._facing_postflop_bet(state, info, board) == {"action": "fold"}
+
+
+def test_near_nut_monster_can_still_call_when_equity_undershoots(monkeypatch):
+    state = make_state(
+        cards=("Ah", "Kh"),
+        board=("Qh", "Jh", "Th", "2c", "3d"),
+        street="river",
+        current_bet=2_000,
+        amount_owed=2_000,
+        can_check=False,
+        pot=3_000,
+        your_stack=8_000,
+    )
+    board = bot._board_class(state["community_cards"])
+    info = bot._hand_info(state)
+    monkeypatch.setattr(bot, "_estimate_state_equity", lambda state, samples=None: 0.30)
+    monkeypatch.setattr(bot, "_equity_realization_factor", lambda state, info: 1.0)
+
+    assert info["strength"] == "monster"
+    assert bot._is_near_nut_hand(info, state["your_cards"], state["community_cards"]) is True
+    assert bot._facing_postflop_bet(state, info, board) == {"action": "call"}
+
+
+def test_multiway_rule_based_equity_discount_folds_top_pair(monkeypatch):
+    state = make_state(
+        n_players=4,
+        cards=("Ah", "Kd"),
+        board=("Kh", "7d", "2c"),
+        current_bet=900,
+        amount_owed=900,
+        can_check=False,
+        pot=1_000,
+    )
+    board = bot._board_class(state["community_cards"])
+    info = bot._hand_info(state)
+    monkeypatch.setattr(bot, "_estimate_state_equity", lambda state, samples=None: None)
+    monkeypatch.setattr(bot, "_equity_realization_factor", lambda state, info: 1.0)
+
+    assert info["strength"] == "tptk_plus"
+    assert bot._facing_postflop_bet(state, info, board) == {"action": "fold"}
+
+
+def test_postflop_all_in_range_weight_narrows_air_and_draws():
+    model = bot.OppModel("villain")
+    air_small = bot._postflop_range_weight(("7s", "2d"), ("Ah", "Kd", "4c"), "raise", model, 0.25)
+    air_jam = bot._postflop_range_weight(("7s", "2d"), ("Ah", "Kd", "4c"), "all_in", model, 1.25)
+    draw_small = bot._postflop_range_weight(("Qh", "Jh"), ("Th", "9c", "2h"), "raise", model, 0.25)
+    draw_jam = bot._postflop_range_weight(("Qh", "Jh"), ("Th", "9c", "2h"), "all_in", model, 1.25)
+    value_small = bot._postflop_range_weight(("As", "Qs"), ("Js", "Ts", "9s"), "raise", model, 0.25)
+    value_jam = bot._postflop_range_weight(("As", "Qs"), ("Js", "Ts", "9s"), "all_in", model, 1.25)
+
+    assert air_jam < air_small
+    assert draw_jam < draw_small
+    assert value_jam > value_small
+
+
+def test_empty_villain_range_fallback_is_value_heavy(monkeypatch):
+    state = make_state(
+        cards=("As", "Ad"),
+        board=("Kh", "Qh", "Jh"),
+        action_log=[
+            {"seat": 1, "action": "raise", "amount": 900, "street": "flop"},
+        ],
+    )
+    monkeypatch.setattr(bot, "_postflop_range_weight", lambda *args, **kwargs: 0.0)
+
+    villain_range = bot._build_heads_up_villain_range(state, state["community_cards"])
+
+    assert villain_range["items"]
+    for c1, c2, _ in villain_range["items"]:
+        info = bot._strategic_hand_info((c1, c2), state["community_cards"])
+        assert (
+            info["made"] >= bot.MADE_VALUE["straight"]
+            or info["set"]
+            or info["trips"]
+            or info["strong_two_pair"]
+            or info["overpair"]
+            or info["tptk"]
+            or info["top_pair"]
+        )
 
 
 def test_positive_ev_draw_semi_bluff_raises(monkeypatch):
@@ -614,6 +722,37 @@ def test_river_low_spr_can_choose_all_in(monkeypatch):
     monkeypatch.setattr(bot, "_river_raise_probability", lambda state, bet_fraction, board, model: 0.0)
 
     assert bot.decide(state) == {"action": "all_in"}
+
+
+def test_river_low_spr_strong_hand_does_not_jam(monkeypatch):
+    state = make_state(
+        hand_id="river-low-spr-strong",
+        cards=("Ks", "Kd"),
+        board=("Qh", "7c", "2d", "9s", "3c"),
+        street="river",
+        pot=1_000,
+        your_stack=900,
+    )
+    villain_range = weighted_range(("Qd", "Jd", 100.0))
+    monkeypatch.setattr(bot, "_build_heads_up_villain_range", lambda state, board_cards: villain_range)
+    monkeypatch.setattr(bot, "_river_calling_range", lambda villain_range, board, bet_fraction, model: villain_range)
+    monkeypatch.setattr(bot, "_river_raise_probability", lambda state, bet_fraction, board, model: 0.0)
+
+    action = bot.decide(state)
+
+    assert action["action"] == "raise"
+    assert action["amount"] <= 800
+
+
+def test_river_bluff_candidate_all_in_candidate_is_not_permitted():
+    candidate = {"kind": "bet", "fraction": 0.90, "target": 900, "cost": 900, "all_in": True}
+    context = {
+        "hand_class": "bluff_candidate",
+        "hero_blocks_value": True,
+        "hero_blocks_bluffs": False,
+    }
+
+    assert bot._river_candidate_permitted(candidate, context) is False
 
 
 def test_river_passive_large_bet_folds_one_pair_without_major_blocker(monkeypatch):

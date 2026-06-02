@@ -81,9 +81,18 @@ def _prepare_bot_mount(bot_path):
     if p.endswith(".py") and os.path.isfile(p):
         tmpdir = tempfile.mkdtemp(prefix="fhbot_")
         shutil.copy(p, os.path.join(tmpdir, "bot.py"))
-        sibling_data = os.path.join(os.path.dirname(p), "g5_data")
-        if os.path.isdir(sibling_data):
-            shutil.copytree(sibling_data, os.path.join(tmpdir, "data"))
+        data_target = os.path.join(tmpdir, "data")
+        for dirname in ("g5_data", "complete_v3_data"):
+            sibling_data = os.path.join(os.path.dirname(p), dirname)
+            if os.path.isdir(sibling_data):
+                os.makedirs(data_target, exist_ok=True)
+                for entry in os.listdir(sibling_data):
+                    src = os.path.join(sibling_data, entry)
+                    dst = os.path.join(data_target, entry)
+                    if os.path.isdir(src):
+                        shutil.copytree(src, dst, dirs_exist_ok=True)
+                    else:
+                        shutil.copy2(src, dst)
         return tmpdir, tmpdir
 
     raise ValueError("Unsupported bot path (must be .py, .zip, or directory): " + repr(p))
