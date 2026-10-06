@@ -1,5 +1,7 @@
 # Fullhouse Engine
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/wowthecoder/fullhouse-pokerbot)
+
 > The UK's first quantitative poker bot competition — 1-5 June 2026, London
 > **£4,000 prize pool · Sponsored by Quadrature Capital**
 
